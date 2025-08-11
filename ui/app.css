@@ -65,9 +65,34 @@ code{background:var(--code);padding:2px 6px;border-radius:6px}
 /* Minor */
 .hint{color:var(--muted);display:block;margin:4px 0 6px}
 .status{margin-left:auto;color:var(--muted)}
-mark{background:#fff176;color:inherit;padding:0 2px;border-radius:2px}
+mark{background:#fff17662;color:inherit;padding:0 2px;border-radius:2px}
 
 /* Mobile */
 @media (max-width:720px){
   input[type="text"]{min-width:140px}
 }
+/* ==== tooltip ==== */
+.tip{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; margin-left:6px; cursor:help; user-select:none;
+  border-radius:50%; background:var(--btn); color:var(--fg); border:1px solid var(--line);
+  font:700 12px/1 system-ui,-apple-system,Segoe UI,Arial,sans-serif;
+}
+.tip:hover{ background:var(--btn-hover); }
+.tip:focus{ outline:2px solid var(--accent); outline-offset:2px; }
+.tip[data-tip]::after{
+  content:attr(data-tip);
+  position:absolute; z-index:30;
+  left:50%; transform:translate(-50%,-6px); bottom:calc(100% + 10px);
+  background:var(--card); color:var(--fg); border:1px solid var(--line);
+  border-radius:8px; padding:8px 10px; min-width:220px; max-width:360px;
+  box-shadow:var(--shadow); opacity:0; pointer-events:none;
+  white-space:normal; transition:opacity .12s ease, transform .12s ease;
+}
+.tip[data-tip]::before{
+  content:""; position:absolute; z-index:29; left:50%; transform:translateX(-50%); bottom:100%;
+  border:6px solid transparent; border-top-color:var(--line);
+}
+.tip:hover::after, .tip:focus::after{ opacity:1; transform:translate(-50%,-10px); }
+/* モバイルはホバー不可なので控えめに（必要ならタップでフォーカス） */
+@media (hover:none){ .tip[data-tip]::after{ display:none; } }
