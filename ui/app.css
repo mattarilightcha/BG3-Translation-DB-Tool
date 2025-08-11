@@ -56,7 +56,7 @@ code{background:var(--code);padding:2px 6px;border-radius:6px}
 /* Minor */
 .hint{color:var(--muted);display:block;margin:4px 0 6px}
 .status{margin-left:auto;color:var(--muted)}
-mark{background:#ffe50038;;color:inherit;padding:0 2px;border-radius:2px}
+mark{background:#fff176;color:inherit;padding:0 2px;border-radius:2px}
 
 /* Mobile */
 @media (max-width:720px){
