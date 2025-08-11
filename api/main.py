@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import sqlite3
 from typing import List, Dict
+from fastapi.staticfiles import StaticFiles
+
 
 DB_PATH = "data/app.sqlite"
 
@@ -12,6 +14,7 @@ def get_con():
     return con
 
 app = FastAPI(title="Translation DB Tool API")
+app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
 
 @app.get("/health")
 def health():
