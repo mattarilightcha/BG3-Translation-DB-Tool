@@ -1,0 +1,26 @@
+﻿# Python
+.venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data / artifacts
+data/
+*.sqlite
+*.sqlite3
+*.db
+db/translations.db
+
+# Local dumps / scratch
+branches.txt
+main-full.txt
+diffs-vs-main.txt
+top-level.txt
+
+# Local source files not for repo
+english.loca.xml
+japanese.loca.xml
+BG*.csv

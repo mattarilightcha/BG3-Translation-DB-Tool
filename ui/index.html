@@ -76,7 +76,6 @@
         </tr></thead>
         <tbody></tbody>
       </table>
-
     </div>
   </section>
 
@@ -106,7 +105,7 @@
         <input id="minprio" type="number" placeholder="">
       </label>
 
-      <!-- 新規: プロンプト選択/挿入 -->
+      <!-- プロンプト選択/挿入 -->
       <label class="inline">プロンプト
         <select id="promptSelect"></select>
         <button id="managePrompts" class="ghost" title="プロンプトを編集">編集</button>
@@ -166,7 +165,7 @@
     <small class="hint">取り込み後はFTSを再構築します。完了したらソース一覧も自動更新します。</small>
   </section>
 
-  <!-- 新規: プロンプト管理 -->
+  <!-- プロンプト管理 -->
   <section id="panel-prompts" class="card" role="tabpanel" aria-labelledby="tab-prompts" hidden>
     <div class="prompt-grid">
       <aside class="prompt-list">
@@ -195,7 +194,7 @@
 
 <footer class="app-footer">
   <span>Local DB: <code>data/app.sqlite</code></span>
-  <span>API: <code>/search</code>, <code>/query</code>, <code>/import/xml</code>, <code>/sources</code></span>
+  <span>API: <code>/search</code>, <code>/query</code>, <code>/entry/:id</code>, <code>/import/xml</code>, <code>/sources</code></span>
 </footer>
 
 <script defer src="app.js"></script>
