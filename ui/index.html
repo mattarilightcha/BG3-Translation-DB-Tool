@@ -18,12 +18,31 @@
 </header>
 
 <main class="container">
+  <!-- ルート：ソース名フィルタ（プルダウン＋チェックボックス） -->
+  <section class="card" id="root-filters">
+    <div class="form-row">
+      <div class="multisel">
+        <button id="srcBtn" class="ghost">ソース選択</button>
+        <div id="srcMenu" class="menu" hidden>
+          <div class="menu-head">
+            <button id="srcAll">全選択</button>
+            <button id="srcNone">全解除</button>
+            <button id="srcApply" class="primary">適用</button>
+          </div>
+          <div id="srcList" class="menu-list"></div>
+        </div>
+      </div>
+      <small id="srcSummary" class="muted"></small>
+    </div>
+  </section>
+
   <nav class="tabs" aria-label="モード切替">
     <button class="tab" id="tab-search" aria-selected="false">検索（一覧）</button>
     <button class="tab" id="tab-query" aria-selected="true">照会（LLM補助）</button>
+    <button class="tab" id="tab-import" aria-selected="false">インポート</button>
   </nav>
 
-  <!-- 検索（一覧） -->
+  <!-- 検索 -->
   <section id="panel-search" class="card" role="tabpanel" aria-labelledby="tab-search" hidden>
     <div class="form-row">
       <label class="inline">キーワード
@@ -31,6 +50,9 @@
       </label>
       <label class="inline">size
         <input id="size" type="number" value="20" min="1" max="200">
+      </label>
+      <label class="inline">min_priority
+        <input id="s_minprio" type="number" placeholder="">
       </label>
       <div class="btn-group">
         <button id="btnSearch" class="primary">検索</button>
@@ -41,13 +63,15 @@
 
     <div class="table-wrap">
       <table id="searchTable" class="table" hidden>
-        <thead><tr><th style="width:90px">ID</th><th>EN</th><th>JA</th><th style="width:90px">score</th></tr></thead>
+        <thead><tr>
+          <th style="width:80px">ID</th><th>EN</th><th>JA</th><th style="width:90px">score</th>
+        </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </section>
 
-  <!-- 照会（上下レイアウト） -->
+  <!-- 照会 -->
   <section id="panel-query" class="card" role="tabpanel" aria-labelledby="tab-query">
     <div class="form-row">
       <label class="inline">Top-K
@@ -59,7 +83,7 @@
       <label class="inline"><input id="exact" type="checkbox" checked> 完全一致優先</label>
       <label class="inline"><input id="wb" type="checkbox"> 単語境界（厳密）</label>
       <label class="inline">min_priority
-        <input id="minprio" type="number" value="" placeholder="">
+        <input id="minprio" type="number" placeholder="">
       </label>
       <div class="btn-group">
         <button id="btnRun" class="primary">照会する</button>
@@ -72,11 +96,8 @@
       <div class="status" id="queryStatus"></div>
     </div>
 
-    <label class="hint">ソース名フィルタ（カンマ区切り、空なら全件）</label>
-    <input id="sources" type="text" placeholder="例: BG3 Official, Loca XML" style="width:100%;max-width:720px">
-
     <label class="hint">改行区切りで語/フレーズを貼る（例：saving throw）</label>
-    <textarea id="terms" class="terms" placeholder="saving throw&#10;ability check&#10;Mind Sliver"></textarea>
+    <textarea id="terms" class="terms" placeholder="saving throw&#10;ability check&#10;Saber-Toothed Tiger"></textarea>
 
     <div class="table-wrap">
       <table id="queryTable" class="table" hidden>
@@ -87,11 +108,25 @@
       </table>
     </div>
   </section>
+
+  <!-- インポート（XML） -->
+  <section id="panel-import" class="card" role="tabpanel" aria-labelledby="tab-import" hidden>
+    <div class="form-row">
+      <div class="inline">EN XML <input type="file" id="xmlEN" accept=".xml"></div>
+      <div class="inline">JA XML <input type="file" id="xmlJA" accept=".xml"></div>
+      <div class="inline">src_en <input id="srcEN" type="text" value="Loca EN"></div>
+      <div class="inline">src_ja <input id="srcJA" type="text" value="Loca JP"></div>
+      <div class="inline">priority <input id="prioXML" type="number" value="100"></div>
+      <div class="btn-group"><button id="btnXML" class="primary">XMLインポート</button></div>
+      <div class="status" id="importStatus"></div>
+    </div>
+    <small class="hint">取り込み後はFTSを再構築します。完了したらソース一覧も自動更新します。</small>
+  </section>
 </main>
 
 <footer class="app-footer">
   <span>Local DB: <code>data/app.sqlite</code></span>
-  <span>API: <code>/search</code>, <code>/query</code></span>
+  <span>API: <code>/search</code>, <code>/query</code>, <code>/import/xml</code>, <code>/sources</code></span>
 </footer>
 
 <script defer src="app.js"></script>

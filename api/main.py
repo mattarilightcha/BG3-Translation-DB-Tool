@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Tuple
 import sqlite3, re, unicodedata, os, tempfile, threading, time, webbrowser
 from queue import Queue
 from contextlib import contextmanager
+import xml.etree.ElementTree as ET
 
 DB_PATH = "data/app.sqlite"
 
@@ -15,7 +16,6 @@ _pool: Optional[Queue] = None
 def _new_con() -> sqlite3.Connection:
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
-    # 軽いチューニング
     try:
         con.execute("PRAGMA journal_mode=WAL;")
     except sqlite3.OperationalError:
@@ -43,22 +43,11 @@ def acquire_con():
     finally:
         _pool.put(con)
 
-# ====== Normalization ======
-_Z2H_MAP = {
-    "，": "、",
-    "．": "。",
-    "･": "・",
-    "ｰ": "ー",
-    "－": "ー",
-    "—": "ー",
-    "―": "ー",
-    "〜": "～",
-    "～": "～",
-}
+# ====== Normalization / FTS helpers ======
+_Z2H_MAP = {"，":"、","．":"。","･":"・","ｰ":"ー","－":"ー","—":"ー","―":"ー","〜":"～","～":"～"}
 _WS_RE = re.compile(r"\s+", re.MULTILINE)
 
 def jnorm(text: Optional[str]) -> str:
-    """NFKC + 和文記号/長音/空白の軽量正規化"""
     if not text:
         return ""
     s = unicodedata.normalize("NFKC", text)
@@ -67,6 +56,19 @@ def jnorm(text: Optional[str]) -> str:
     s = _WS_RE.sub(" ", s).strip()
     return s
 
+def fts_phrase(term: str) -> str:
+    """FTS5のMATCHに安全に渡すため、常にフレーズ引用。内部の二重引用符は二重化。"""
+    return '"' + term.replace('"', '""') + '"'
+
+def rebuild_fts(con: sqlite3.Connection):
+    cur = con.cursor()
+    cur.execute("DELETE FROM entries_fts;")
+    cur.execute("""
+        INSERT INTO entries_fts(rowid, en_text, ja_text)
+        SELECT id, en_text, ja_text FROM entry_pairs
+    """)
+    con.commit()
+
 # ====== App ======
 app = FastAPI(title="Translation DB Tool API")
 app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
@@ -74,7 +76,7 @@ app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
 @app.on_event("startup")
 def on_startup():
     init_pool()
-    # UIを自動で開く（reloaderで二重起動しがちなので一度だけ）
+    # UIを自動で開く（reloader二重防止のためフラグ使用）
     try:
         flag = os.path.join(tempfile.gettempdir(), "tdb_ui_opened.flag")
         if not os.path.exists(flag) and os.environ.get("TDB_AUTO_OPEN", "1") == "1":
@@ -91,42 +93,59 @@ def on_startup():
 def health():
     return {"ok": True}
 
-# ========= /search =========
-class SearchItem(BaseModel):
-    id: int
-    en: str
-    ja: str
-    source: Optional[str] = None
-    priority: Optional[int] = None
-    score: float
-    q: str
+# ========= sources list =========
+@app.get("/sources")
+def sources():
+    with acquire_con() as con:
+        cur = con.cursor()
+        cur.execute("""
+            SELECT COALESCE(source_name, '') AS name, COUNT(*) AS cnt
+            FROM entry_pairs
+            GROUP BY COALESCE(source_name, '')
+            ORDER BY cnt DESC, name ASC
+        """)
+        rows = cur.fetchall()
+    return {"sources": [{"name": r["name"], "count": r["cnt"]} for r in rows]}
 
+# ========= /search =========
 @app.get("/search")
-def search(q: str, page: int = 1, size: int = 50, max_len: int = 0):
-    """
-    FTS全文検索。q=検索語句
-    max_len: 0なら無制限、>0ならその長さを超える候補はサマリ（…）で返す
-    """
+def search(
+    q: str,
+    page: int = 1,
+    size: int = 50,
+    max_len: int = 0,
+    sources: List[str] = Query(default=[]),          # /search?sources=A&sources=B...
+    min_priority: Optional[int] = None
+):
     qn = jnorm(q)
     off = (page - 1) * size
+
+    filters = []
+    params: List = [fts_phrase(qn)]
+    if sources:
+        placeholders = ",".join(["?"] * len(sources))
+        filters.append(f"e.source_name IN ({placeholders})")
+        params.extend(sources)
+    if min_priority is not None:
+        filters.append("e.priority >= ?")
+        params.append(min_priority)
+    and_filters = ("AND " + " AND ".join(filters)) if filters else ""
 
     with acquire_con() as con:
         cur = con.cursor()
         cur.execute(
-            """
-            SELECT e.id,
-                   e.en_text AS en,
-                   e.ja_text AS ja,
-                   e.source_name AS source,
-                   e.priority AS priority,
+            f"""
+            SELECT e.id, e.en_text AS en, e.ja_text AS ja,
+                   e.source_name AS source, e.priority AS priority,
                    bm25(entries_fts) AS score
             FROM entries_fts
             JOIN entry_pairs e ON entries_fts.rowid = e.id
             WHERE entries_fts MATCH ?
+            {and_filters}
             ORDER BY score ASC
             LIMIT ? OFFSET ?
             """,
-            (qn, size, off),
+            (*params, size, off),
         )
         rows = cur.fetchall()
 
@@ -153,26 +172,21 @@ def search(q: str, page: int = 1, size: int = 50, max_len: int = 0):
             en = snippet(en, qn, max_len)
             ja = snippet(ja, qn, max_len)
         items.append({
-            "id": r["id"],
-            "en": en,
-            "ja": ja,
-            "source": r["source"],
-            "priority": r["priority"],
-            "score": float(r["score"]),
-            "q": qn,
+            "id": r["id"], "en": en, "ja": ja,
+            "source": r["source"], "priority": r["priority"],
+            "score": float(r["score"]), "q": qn,
         })
-
     return {"items": items, "total": None}
 
 # ========= /query =========
 class QueryIn(BaseModel):
     lines: List[str]
     top_k: int = 3
-    max_len: int = 0                 # 0=無制限、>0は抜粋
-    exact: bool = True               # 完全一致をまず試す
-    word_boundary: bool = False      # 単語境界（英語フレーズ向け）: Python正規表現 \b で厳密化
-    sources: List[str] = []          # source_name のホワイトリスト（空なら全件）
-    min_priority: Optional[int] = None  # priority の下限フィルタ
+    max_len: int = 0
+    exact: bool = True
+    word_boundary: bool = False
+    sources: List[str] = []
+    min_priority: Optional[int] = None
 
 def _snippet(text: str, term: str, max_chars: int) -> str:
     if max_chars <= 0 or not text:
@@ -204,17 +218,9 @@ def _add_pair_uniqued(
 
 @app.post("/query")
 def query(body: QueryIn):
-    """
-    各語/フレーズについて:
-      1) 完全一致（optional。sources/priorityフィルタ対応）
-      2) FTS（word_boundary=True なら FTSヒット後に Pythonの \b で厳密フィルタ）
-    を合算しTop-K返す。返却候補は (en, ja, source, priority)。
-    max_len>0 なら抜粋にサマリ。
-    """
     out: List[Dict] = []
     seen_terms = set()
 
-    # 共有フィルタ句（entry_pairsに対して）
     filters = []
     params_base: List = []
     if body.sources:
@@ -236,7 +242,6 @@ def query(body: QueryIn):
         matches: List[Tuple[str, str, Optional[str], Optional[int]]] = []
         seen_pairs: set = set()
 
-        # 単語境界用 正規表現（英字のみ想定）
         re_pat = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE) if body.word_boundary else None
 
         with acquire_con() as con:
@@ -260,23 +265,20 @@ def query(body: QueryIn):
                     if _add_pair_uniqued(matches, en, ja, r["source"], r["priority"], seen_pairs, body.top_k):
                         break
 
-            # 2) FTS 補完（多めに取って絞る）
+            # 2) FTS 補完（常に安全なフレーズ引用で投げる→ Python側で境界厳密化）
             remain = body.top_k - len(matches)
             if remain > 0:
-                fts_query = term  # 厳密境界はPython側で
                 cur.execute(
                     f"""
-                    SELECT e.en_text AS en,
-                           e.ja_text AS ja,
-                           e.source_name AS source,
-                           e.priority AS priority
+                    SELECT e.en_text AS en, e.ja_text AS ja,
+                           e.source_name AS source, e.priority AS priority
                     FROM entries_fts
                     JOIN entry_pairs e ON entries_fts.rowid = e.id
                     WHERE entries_fts MATCH ?
                     {and_filters}
                     LIMIT ?
                     """,
-                    [fts_query, *params_base, remain * 6]
+                    [fts_phrase(term), *params_base, remain * 6]
                 )
                 for r in cur.fetchall():
                     en, ja = r["en"] or "", r["ja"] or ""
@@ -285,7 +287,6 @@ def query(body: QueryIn):
                     if _add_pair_uniqued(matches, en, ja, r["source"], r["priority"], seen_pairs, body.top_k):
                         break
 
-        # 3) 長すぎる候補はサマリ
         if body.max_len and matches:
             summarized = []
             for en, ja, src, pr in matches:
@@ -300,3 +301,55 @@ def query(body: QueryIn):
         })
 
     return out
+
+# ========= /import/xml =========
+@app.post("/import/xml")
+def import_xml(
+    enfile: UploadFile = File(...),
+    jafile: UploadFile = File(...),
+    src_en: str = Form("Loca EN"),
+    src_ja: str = Form("Loca JP"),
+    priority: int = Form(100)
+):
+    """
+    英/日XMLを取り込み、idで突き合わせて entry_pairs に一括登録 → FTS再構築。
+    XMLは <... id="...">テキスト</...> のように id 属性を持つ要素であればOK。
+    """
+    en_bytes = enfile.file.read()
+    ja_bytes = jafile.file.read()
+
+    def map_from_xml(b: bytes) -> Dict[str, str]:
+        m: Dict[str, str] = {}
+        root = ET.fromstring(b)
+        for el in root.iter():
+            idv = el.attrib.get("id")
+            if not idv:
+                continue
+            txt = "".join(el.itertext()).strip()
+            if txt:
+                m[idv] = txt
+        return m
+
+    en_map = map_from_xml(en_bytes)
+    ja_map = map_from_xml(ja_bytes)
+
+    count_pairs = 0
+    with acquire_con() as con:
+        cur = con.cursor()
+        src_name = f"XML:{src_en}|{src_ja}"
+        rows = []
+        for k, en_text in en_map.items():
+            ja_text = ja_map.get(k, "")
+            # どちらか片方でもあれば入れる
+            if en_text or ja_text:
+                rows.append((en_text, ja_text, src_name, priority))
+        if rows:
+            cur.executemany(
+                "INSERT INTO entry_pairs(en_text, ja_text, source_name, priority) VALUES (?,?,?,?)",
+                rows
+            )
+            con.commit()
+            rebuild_fts(con)
+            count_pairs = len(rows)
+
+    return {"inserted": count_pairs, "source_name": f"XML:{src_en}|{src_ja}"}
