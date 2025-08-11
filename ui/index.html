@@ -18,7 +18,7 @@
 </header>
 
 <main class="container">
-  <!-- ルート：ソース名フィルタ（プルダウン＋チェックボックス） -->
+  <!-- ルート：ソース名フィルタ -->
   <section class="card" id="root-filters">
     <div class="form-row">
       <div class="multisel">
@@ -38,9 +38,10 @@
   </section>
 
   <nav class="tabs" aria-label="モード切替">
-    <button class="tab" id="tab-search" aria-selected="false">検索（一覧）</button>
-    <button class="tab" id="tab-query" aria-selected="true">照会（LLM補助）</button>
-    <button class="tab" id="tab-import" aria-selected="false">インポート</button>
+    <button class="tab" id="tab-search"  aria-selected="false">検索（一覧）</button>
+    <button class="tab" id="tab-query"   aria-selected="true">照会（LLM補助）</button>
+    <button class="tab" id="tab-import"  aria-selected="false">インポート</button>
+    <button class="tab" id="tab-prompts" aria-selected="false">プロンプト</button>
   </nav>
 
   <!-- 検索 -->
@@ -98,6 +99,13 @@
         <input id="minprio" type="number" placeholder="">
       </label>
 
+      <!-- 新規: プロンプト選択/挿入 -->
+      <label class="inline">プロンプト
+        <select id="promptSelect"></select>
+        <button id="managePrompts" class="ghost" title="プロンプトを編集">編集</button>
+      </label>
+      <label class="inline"><input id="includePrompt" type="checkbox" checked> コピー/保存に含める</label>
+
       <div class="btn-group">
         <button id="btnRun" class="primary">照会する</button>
         <button id="copyJSONL">JSONLコピー</button>
@@ -123,42 +131,59 @@
   </section>
 
   <!-- インポート（XML） -->
-<section id="panel-import" class="card" role="tabpanel" aria-labelledby="tab-import" hidden>
-  <div class="form-row">
-    <div class="inline">EN XML
-      <span class="tip" tabindex="0"
-            data-tip="英語の .loca.xml（id属性で行を特定）。EN/JAのidが一致する行を対にして登録します。">i</span>
-      <input type="file" id="xmlEN" accept=".xml">
+  <section id="panel-import" class="card" role="tabpanel" aria-labelledby="tab-import" hidden>
+    <div class="form-row">
+      <div class="inline">EN XML
+        <span class="tip" tabindex="0" data-tip="英語の .loca.xml（id属性で行を特定）。EN/JAのidが一致する行を対にして登録します。">i</span>
+        <input type="file" id="xmlEN" accept=".xml">
+      </div>
+      <div class="inline">JA XML
+        <span class="tip" tabindex="0" data-tip="日本語の .loca.xml。EN XML と同じ id を持つ行が対訳として結合されます。">i</span>
+        <input type="file" id="xmlJA" accept=".xml">
+      </div>
+      <div class="inline">src_en
+        <span class="tip" tabindex="0" data-tip="取り込み元の識別ラベル（英側）。後でsourceフィルタや出力に表示されます。">i</span>
+        <input id="srcEN" type="text" value="Loca EN">
+      </div>
+      <div class="inline">src_ja
+        <span class="tip" tabindex="0" data-tip="取り込み元の識別ラベル（日本語側）。ENと合わせて 'XML:EN|JA' の形式で保存。">i</span>
+        <input id="srcJA" type="text" value="Loca JP">
+      </div>
+      <div class="inline">priority
+        <span class="tip" tabindex="0" data-tip="優先度の目安となる整数。数が小さいほど“強い訳”として扱う運用を推奨（UIのフィルタで下限指定可）。">i</span>
+        <input id="prioXML" type="number" value="100">
+      </div>
+      <div class="btn-group"><button id="btnXML" class="primary">XMLインポート</button></div>
+      <div class="status" id="importStatus"></div>
     </div>
-    <div class="inline">JA XML
-      <span class="tip" tabindex="0"
-            data-tip="日本語の .loca.xml。EN XML と同じ id を持つ行が対訳として結合されます。">i</span>
-      <input type="file" id="xmlJA" accept=".xml">
-    </div>
+    <small class="hint">取り込み後はFTSを再構築します。完了したらソース一覧も自動更新します。</small>
+  </section>
 
-    <div class="inline">src_en
-      <span class="tip" tabindex="0"
-            data-tip="取り込み元の識別ラベル（英側）。後でsourceフィルタや出力に表示されます。">i</span>
-      <input id="srcEN" type="text" value="Loca EN">
+  <!-- 新規: プロンプト管理 -->
+  <section id="panel-prompts" class="card" role="tabpanel" aria-labelledby="tab-prompts" hidden>
+    <div class="prompt-grid">
+      <aside class="prompt-list">
+        <div class="form-row">
+          <button id="newPrompt">＋ 新規テンプレ</button>
+        </div>
+        <ul id="promptsUl"></ul>
+      </aside>
+      <section class="prompt-editor">
+        <div class="form-row">
+          <label class="inline" style="flex:1">名前
+            <input id="pName" type="text" placeholder="例：Gemini翻訳補助（最小）" style="width:100%">
+          </label>
+          <div class="btn-group">
+            <button id="savePrompt" class="primary">保存/更新</button>
+            <button id="deletePrompt">削除</button>
+            <button id="setDefault">既定にする</button>
+          </div>
+        </div>
+        <textarea id="pBody" class="terms" placeholder="ここにプロンプト本文。"></textarea>
+        <small class="hint">保存はローカル（localStorage）。照会タブで選択してコピー/保存に前置できます。</small>
+      </section>
     </div>
-    <div class="inline">src_ja
-      <span class="tip" tabindex="0"
-            data-tip="取り込み元の識別ラベル（日本語側）。ENと合わせて 'XML:EN|JA' の形式で保存。">i</span>
-      <input id="srcJA" type="text" value="Loca JP">
-    </div>
-
-    <div class="inline">priority
-      <span class="tip" tabindex="0"
-            data-tip="優先度の目安となる整数。数が小さいほど“強い訳”として扱う運用を推奨（UIのフィルタで下限指定可）。">i</span>
-      <input id="prioXML" type="number" value="100">
-    </div>
-
-    <div class="btn-group"><button id="btnXML" class="primary">XMLインポート</button></div>
-    <div class="status" id="importStatus"></div>
-  </div>
-  <small class="hint">取り込み後はFTSを再構築します。完了したらソース一覧も自動更新します。</small>
-</section>
-
+  </section>
 </main>
 
 <footer class="app-footer">

@@ -44,16 +44,18 @@ function downloadText(filename, content, mime='text/plain'){
 
 /* ===== Tabs ===== */
 function showTab(id){
-  const ids = ['search','query','import'];
+  const ids = ['search','query','import','prompts'];
   for(const x of ids){
     $('#panel-'+x).hidden = (x!==id);
     $('#tab-'+x).setAttribute('aria-selected', String(x===id));
   }
 }
-$('#tab-search').onclick = ()=>showTab('search');
-$('#tab-query').onclick  = ()=>showTab('query');
-$('#tab-import').onclick = ()=>showTab('import');
+$('#tab-search').onclick  = ()=>showTab('search');
+$('#tab-query').onclick   = ()=>showTab('query');
+$('#tab-import').onclick  = ()=>showTab('import');
+$('#tab-prompts').onclick = ()=>showTab('prompts');
 showTab('query'); // default
+$('#managePrompts').onclick = ()=>showTab('prompts');
 
 /* ===== Root: Source multiselect ===== */
 let SELECTED_SOURCES = new Set();
@@ -64,19 +66,18 @@ function renderSourcesMenu(list){
   const box = $('#srcList'); box.innerHTML = '';
   for(const s of list){
     const id = 'src_' + btoa(encodeURIComponent(s.name)).replace(/=+$/,'');
-    const chk = document.createElement('div');
-    chk.innerHTML = `
+    const row = document.createElement('div');
+    row.innerHTML = `
       <label for="${id}">
         <span title="${escapeHtml(s.name)}">${escapeHtml(s.name||'(empty)')}</span>
         <span class="count">${s.count}</span>
-      </label>
-    `;
+      </label>`;
     const input = document.createElement('input');
     input.type='checkbox'; input.id=id; input.value=s.name;
     input.checked = (SELECTED_SOURCES.size===0) ? true : SELECTED_SOURCES.has(s.name);
     input.style.marginRight='8px';
-    chk.querySelector('label').prepend(input);
-    box.appendChild(chk);
+    row.querySelector('label').prepend(input);
+    box.appendChild(row);
   }
   updateSourceSummary();
 }
@@ -97,7 +98,7 @@ $('#srcAll').onclick = ()=>{
   [...$('#srcList').querySelectorAll('input[type=checkbox]')].forEach(c=>c.checked=true);
 };
 $('#srcNone').onclick = ()=>{
-  SELECTED_SOURCES = new Set(); // 空＝全ソース扱い
+  SELECTED_SOURCES = new Set();
   [...$('#srcList').querySelectorAll('input[type=checkbox]')].forEach(c=>c.checked=false);
 };
 $('#srcApply').onclick = ()=>{
@@ -106,14 +107,9 @@ $('#srcApply').onclick = ()=>{
   updateSourceSummary();
   $('#srcMenu').hidden = true;
 };
-
-// 初回ロード：/sources を取得
 (async function loadSources(){
-  try{
-    const res = await fetch('/sources');
-    const data = await res.json();
-    renderSourcesMenu(data.sources||[]);
-  }catch(e){ console.error(e); }
+  try{ const res = await fetch('/sources'); const data = await res.json(); renderSourcesMenu(data.sources||[]); }
+  catch(e){ console.error(e); }
 })();
 
 /* ===== Search ===== */
@@ -158,6 +154,85 @@ $('#copyTable').onclick = ()=>{
   navigator.clipboard.writeText(tsv);
 };
 
+/* ===== Prompts: storage & UI ===== */
+const PROMPTS_KEY = 'tdb-prompts';
+const PROMPT_ACTIVE_KEY = 'tdb-prompt-active';
+
+function loadPrompts(){
+  let arr = [];
+  try{ arr = JSON.parse(localStorage.getItem(PROMPTS_KEY) || '[]'); }catch{}
+  if(!arr.length){
+    arr = [
+      {
+        id: 'p1',
+        name: 'Gemini翻訳補助（最小）',
+        body:
+`以下は候補辞書（TSV）です。優先して一致を参照し、固有名詞は統一してください。
+出力は原文の文意を尊重しつつ自然な日本語に。辞書に該当が無い場合のみ推測可。`
+      },
+      {
+        id: 'p2',
+        name: '用語固定・丁寧口調',
+        body:
+`候補辞書を最優先で採用。既出用語は徹底して統一。
+文体は「です・ます」。意訳し過ぎず、ゲームのUIに収まる簡潔さを重視。`
+      }
+    ];
+    savePrompts(arr);
+    localStorage.setItem(PROMPT_ACTIVE_KEY, 'p1');
+  }
+  return arr;
+}
+function savePrompts(arr){ localStorage.setItem(PROMPTS_KEY, JSON.stringify(arr)); }
+function activePromptId(){ return localStorage.getItem(PROMPT_ACTIVE_KEY) || (loadPrompts()[0]?.id || ''); }
+function setActivePrompt(id){ localStorage.setItem(PROMPT_ACTIVE_KEY, id); renderPromptSelect(); renderPromptList(); }
+
+function getPromptById(id){
+  return loadPrompts().find(p=>p.id===id) || null;
+}
+function renderPromptSelect(){
+  const sel = $('#promptSelect');
+  const arr = loadPrompts();
+  const act = activePromptId();
+  sel.innerHTML = arr.map(p=>`<option value="${p.id}" ${p.id===act?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
+}
+function renderPromptList(){
+  const ul = $('#promptsUl'); ul.innerHTML = '';
+  const arr = loadPrompts(); const act = activePromptId();
+  for(const p of arr){
+    const li = document.createElement('li');
+    li.innerHTML = `<span>${escapeHtml(p.name)}</span><span class="meta">${p.id===act?'既定':''}</span>`;
+    li.onclick = ()=>{
+      $('#pName').value = p.name;
+      $('#pBody').value = p.body;
+      $('#setDefault').onclick = ()=> setActivePrompt(p.id);
+      $('#savePrompt').onclick = ()=> {
+        const updated = loadPrompts().map(x=> x.id===p.id ? ({...x, name:$('#pName').value.trim()||x.name, body:$('#pBody').value}) : x );
+        savePrompts(updated); renderPromptList(); renderPromptSelect();
+      };
+      $('#deletePrompt').onclick = ()=> {
+        const left = loadPrompts().filter(x=>x.id!==p.id);
+        savePrompts(left);
+        if(activePromptId()===p.id && left.length){ setActivePrompt(left[0].id); }
+        renderPromptList(); renderPromptSelect();
+        $('#pName').value=''; $('#pBody').value='';
+      };
+    };
+    ul.appendChild(li);
+  }
+}
+$('#newPrompt').onclick = ()=>{
+  const id = 'p' + Date.now();
+  const arr = loadPrompts();
+  arr.unshift({id, name:'新しいプロンプト', body:''});
+  savePrompts(arr); setActivePrompt(id);
+  $('#pName').value='新しいプロンプト'; $('#pBody').value='';
+  renderPromptList(); renderPromptSelect(); showTab('prompts');
+};
+// 初期描画
+renderPromptSelect(); renderPromptList();
+$('#promptSelect').onchange = (e)=> setActivePrompt(e.target.value);
+
 /* ===== Query ===== */
 async function runQuery(){
   const lines = $('#terms').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
@@ -186,7 +261,6 @@ function renderQueryTable(rows, topk){
   const tb = t.tBodies[0];
   tb.innerHTML = '';
 
-  // ヘッダを Top-K に合わせて作り直し
   const thead = t.tHead;
   if (thead) {
     thead.rows[0].innerHTML = `<th style="width:20%">Term</th>` +
@@ -216,7 +290,10 @@ function renderQueryTable(rows, topk){
 }
 $('#btnRun').onclick = runQuery;
 
-function toJSONL(rows){ return rows.map(r=>JSON.stringify(r)).join('\n'); }
+/* ===== Exports with Prompt ===== */
+function toJSONL(rows){
+  return rows.map(r=>JSON.stringify(r)).join('\n');
+}
 function toTSV(rows, topk = Math.max(1, Number($('#topk').value)||3)){
   const head=['term']; for(let i=1;i<=topk;i++){ head.push(`EN${i}`,`JA${i}`,`SRC${i}`,`PRIO${i}`); }
   const body=(rows||[]).map(r=>{
@@ -238,11 +315,46 @@ function toCSV(rows, topk = Math.max(1, Number($('#topk').value)||3)){
   });
   return [head.map(esc).join(','), ...body].join('\n');
 }
-$('#copyJSONL').onclick = ()=>{ if(window._lastQuery){ navigator.clipboard.writeText(toJSONL(window._lastQuery)); $('#queryStatus').textContent='JSONLコピー完了'; } };
-$('#copyTSV').onclick   = ()=>{ if(window._lastQuery){ navigator.clipboard.writeText(toTSV(window._lastQuery));   $('#queryStatus').textContent='TSVコピー完了';   } };
-$('#dlJSONL').onclick   = ()=>{ if(window._lastQuery){ downloadText('query_export.jsonl', toJSONL(window._lastQuery), 'application/json'); } };
-$('#dlTSV').onclick     = ()=>{ if(window._lastQuery){ downloadText('query_export.tsv',   toTSV(window._lastQuery),   'text/tab-separated-values'); } };
-$('#dlCSV').onclick     = ()=>{ if(window._lastQuery){ downloadText('query_export.csv',   toCSV(window._lastQuery),   'text/csv'); } };
+
+function buildWithPrompt(rawText, kind){
+  if(!$('#includePrompt').checked) return rawText;
+  const p = getPromptById(activePromptId());
+  if(!p) return rawText;
+
+  if(kind==='jsonl'){
+    const meta = JSON.stringify({type:'prompt', name:p.name, prompt:p.body});
+    return meta + '\n' + rawText; // 先頭に1行メタ
+  }
+  // tsv/csv はプレーンに前置
+  return `${p.name}\n${p.body}\n\n${rawText}`;
+}
+
+// Copy / Download
+$('#copyJSONL').onclick = ()=>{
+  if(!window._lastQuery) return;
+  const txt = buildWithPrompt(toJSONL(window._lastQuery), 'jsonl');
+  navigator.clipboard.writeText(txt); $('#queryStatus').textContent='JSONLコピー完了';
+};
+$('#copyTSV').onclick = ()=>{
+  if(!window._lastQuery) return;
+  const txt = buildWithPrompt(toTSV(window._lastQuery), 'tsv');
+  navigator.clipboard.writeText(txt); $('#queryStatus').textContent='TSVコピー完了';
+};
+$('#dlJSONL').onclick = ()=>{
+  if(!window._lastQuery) return;
+  const txt = buildWithPrompt(toJSONL(window._lastQuery), 'jsonl');
+  downloadText('query_export.jsonl', txt, 'application/json');
+};
+$('#dlTSV').onclick = ()=>{
+  if(!window._lastQuery) return;
+  const txt = buildWithPrompt(toTSV(window._lastQuery), 'tsv');
+  downloadText('query_export.tsv', txt, 'text/tab-separated-values');
+};
+$('#dlCSV').onclick = ()=>{
+  if(!window._lastQuery) return;
+  const txt = buildWithPrompt(toCSV(window._lastQuery), 'csv');
+  downloadText('query_export.csv', txt, 'text/csv');
+};
 
 /* ===== Import (XML) ===== */
 $('#btnXML').onclick = async ()=>{
@@ -255,17 +367,14 @@ $('#btnXML').onclick = async ()=>{
   $('#importStatus').textContent='インポート中…（サイズにより時間がかかります）';
 
   const fd = new FormData();
-  fd.append('enfile', en);
-  fd.append('jafile', ja);
-  fd.append('src_en', srcEN);
-  fd.append('src_ja', srcJA);
+  fd.append('enfile', en); fd.append('jafile', ja);
+  fd.append('src_en', srcEN); fd.append('src_ja', srcJA);
   fd.append('priority', String(prio));
 
   try{
     const res = await fetch('/import/xml', {method:'POST', body: fd});
     const data = await res.json();
     $('#importStatus').textContent = `取り込み完了：${data.inserted} 行（source=${data.source_name}）`;
-    // ソース一覧を更新
     const srcRes = await fetch('/sources'); const srcData = await srcRes.json();
     renderSourcesMenu(srcData.sources||[]);
   }catch(e){
