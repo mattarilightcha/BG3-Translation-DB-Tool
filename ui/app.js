@@ -56,17 +56,23 @@ async function doSearch(){
   if(!q){ $('#searchStatus').textContent = '検索語を入力'; return; }
   $('#searchStatus').textContent = '検索中…';
   const url = new URL('/search', location.origin);
-  url.searchParams.set('q', q); url.searchParams.set('size', String(size));
+  url.searchParams.set('q', q);
+  url.searchParams.set('size', String(size));
+  url.searchParams.set('max_len', '240'); // ハイライトとスニペット
   const res = await fetch(url);
   const data = await res.json();
-  renderSearchTable(data.items||[]);
-  $('#searchStatus').textContent = `表示 ${data.items?.length||0} / total ${data.total}`;
+  renderSearchTable(data.items||[], q);
+  $('#searchStatus').textContent = `表示 ${data.items?.length||0}`;
 }
-function renderSearchTable(items){
+function renderSearchTable(items, q){
   const t = $('#searchTable'); const tb = t.tBodies[0]; tb.innerHTML = '';
   for(const r of items){
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.id}</td><td><code>${escapeHtml(r.en||'')}</code></td><td>${escapeHtml(r.ja||'')}</td><td>${Number(r.score).toFixed(2)}</td>`;
+    tr.innerHTML =
+      `<td>${r.id}</td>`+
+      `<td><code>${highlightHtml(r.en||'', q)}</code></td>`+
+      `<td>${highlightHtml(r.ja||'', q)}</td>`+
+      `<td>${Number(r.score).toFixed(2)}</td>`;
     tb.appendChild(tr);
   }
   t.hidden = items.length===0;
@@ -84,24 +90,48 @@ $('#copyTable').onclick = ()=>{
 async function runQuery(){
   const lines = $('#terms').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
   const top_k = Math.max(1, Math.min(5, Number($('#topk').value)||3));
-  if(!lines.length){ $('#queryStatus').textContent = '語を入力'; return; }
-  $('#queryStatus').textContent = '照会中…';
-  const res = await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lines, top_k})});
+  const max_len = Math.max(0, Number($('#maxlen').value)||0);
+  const exact = $('#exact').checked;
+  const word_boundary = $('#wb').checked;
+  const min_priority = $('#minprio').value === '' ? null : Number($('#minprio').value);
+  const sources = $('#sources').value.split(',').map(s=>s.trim()).filter(Boolean);
+
+  if(!lines.length){ $('#queryStatus').textContent='語を入力'; return; }
+  $('#queryStatus').textContent='照会中…';
+
+  const res = await fetch('/query',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({lines, top_k, max_len, exact, word_boundary, min_priority, sources})
+  });
   const data = await res.json();
   window._lastQuery = data;
-  renderQueryTable(data);
+  renderQueryTable(data, top_k);
   $('#queryStatus').textContent = `対象 ${data.length} 行`;
 }
-function renderQueryTable(rows){
-  const t = $('#queryTable'); const tb = t.tBodies[0]; tb.innerHTML = '';
+
+function renderQueryTable(rows, topk){
+  const t = $('#queryTable');
+  const tb = t.tBodies[0];
+  tb.innerHTML = '';
+
+  // ヘッダを Top-K に合わせて作り直し
+  const thead = t.tHead;
+  if (thead) {
+    thead.rows[0].innerHTML = `<th style="width:20%">Term</th>` +
+      Array.from({length: topk}, (_,i)=>`<th>候補${i+1}</th>`).join('');
+  }
+
   for(const r of rows){
     const tr = document.createElement('tr');
     const tdTerm = document.createElement('td'); tdTerm.textContent = r.term; tr.appendChild(tdTerm);
-    for(let i=0;i<3;i++){
+    const cands = r.candidates || [];
+    for(let i=0;i<topk;i++){
       const td = document.createElement('td');
-      const p = (r.candidates||[])[i];
+      const p = cands[i];
       if(p){
-        const en = snippetAround(r.term, p[0]); const ja = snippetAround(r.term, p[1]);
+        const en = snippetAround(r.term, p[0]);
+        const ja = snippetAround(r.term, p[1]);
         td.innerHTML = `<div><code>${highlightHtml(en, r.term)}</code></div><div>${highlightHtml(ja, r.term)}</div>`;
       }
       tr.appendChild(td);
@@ -110,7 +140,9 @@ function renderQueryTable(rows){
   }
   t.hidden = rows.length===0;
 }
+
 $('#btnRun').onclick = runQuery;
+
 function toJSONL(rows){
   return rows.map(r=>{
     const c=(r.candidates||[]).map(p=>[(p?.[0]||''),(p?.[1]||'')]); 
