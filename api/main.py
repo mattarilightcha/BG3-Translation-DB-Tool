@@ -353,3 +353,91 @@ def import_xml(
             count_pairs = len(rows)
 
     return {"inserted": count_pairs, "source_name": f"XML:{src_en}|{src_ja}"}
+
+# ===== entry read/update =====
+from typing import Optional
+
+class EntryUpdate(BaseModel):
+    en_text: Optional[str] = None
+    ja_text: Optional[str] = None
+    source_name: Optional[str] = None
+    priority: Optional[int] = None
+
+def _update_fts_for_id(cur: sqlite3.Cursor, rowid: int, en: str, ja: str):
+    # FTSの該当rowを差し替え
+    cur.execute("DELETE FROM entries_fts WHERE rowid=?", (rowid,))
+    cur.execute("INSERT INTO entries_fts(rowid, en_text, ja_text) VALUES (?,?,?)", (rowid, en, ja))
+
+@app.get("/entry/{id}")
+def get_entry(id: int):
+    with acquire_con() as con:
+        cur = con.cursor()
+        cur.execute("""
+            SELECT id, en_text, ja_text, source_name, priority
+            FROM entry_pairs WHERE id=?
+        """, (id,))
+        r = cur.fetchone()
+        if not r:
+            return {"error": "not found"}, 404
+        return dict(r)
+
+@app.patch("/entry/{id}")
+def patch_entry(id: int, body: EntryUpdate):
+    fields = []
+    params = []
+    if body.en_text is not None:
+        fields.append("en_text=?")
+        params.append(body.en_text)
+    if body.ja_text is not None:
+        fields.append("ja_text=?")
+        params.append(body.ja_text)
+    if body.source_name is not None:
+        fields.append("source_name=?")
+        params.append(body.source_name)
+    if body.priority is not None:
+        fields.append("priority=?")
+        params.append(body.priority)
+    if not fields:
+        return {"updated": 0}
+
+    with acquire_con() as con:
+        cur = con.cursor()
+        cur.execute(f"UPDATE entry_pairs SET {', '.join(fields)} WHERE id=?", (*params, id))
+        # 最新値でFTS更新
+        cur.execute("SELECT en_text, ja_text FROM entry_pairs WHERE id=?", (id,))
+        row = cur.fetchone()
+        if row:
+            _update_fts_for_id(cur, id, row["en_text"] or "", row["ja_text"] or "")
+        con.commit()
+
+        cur.execute("""
+            SELECT id, en_text, ja_text, source_name, priority
+            FROM entry_pairs WHERE id=?
+        """, (id,))
+        return dict(cur.fetchone())
+
+class EntryPatchItem(EntryUpdate):
+    id: int
+
+@app.post("/entries/bulk_update")
+def bulk_update(items: List[EntryPatchItem]):
+    if not items:
+        return {"updated": 0}
+    with acquire_con() as con:
+        cur = con.cursor()
+        count = 0
+        for it in items:
+            fields, params = [], []
+            if it.en_text is not None: fields.append("en_text=?"); params.append(it.en_text)
+            if it.ja_text is not None: fields.append("ja_text=?"); params.append(it.ja_text)
+            if it.source_name is not None: fields.append("source_name=?"); params.append(it.source_name)
+            if it.priority is not None: fields.append("priority=?"); params.append(it.priority)
+            if not fields: continue
+            cur.execute(f"UPDATE entry_pairs SET {', '.join(fields)} WHERE id=?", (*params, it.id))
+            cur.execute("SELECT en_text, ja_text FROM entry_pairs WHERE id=?", (it.id,))
+            row = cur.fetchone()
+            if row:
+                _update_fts_for_id(cur, it.id, row["en_text"] or "", row["ja_text"] or "")
+                count += 1
+        con.commit()
+    return {"updated": count}
