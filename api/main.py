@@ -275,15 +275,53 @@ def patch_entry(id: int, body: EntryUpdate):
 
 # ---------- import XML (multipart, strict) ----------
 def _extract_id_text_pairs(root: ET.Element):
+    """
+    BG3系 loca.xml など、いろんな“ID属性名/テキスト格納場所”に対応:
+      - ID属性候補: id, contentuid, contentuid_lc, handle, uid, guid
+      - テキスト候補: ノード直下のtext / 子要素<string|value|text|content|_|t|v> のtext
+    空文字は無視（validに含めない）。戻り値は (total_nodes_with_id_attr, {id: text})
+    """
+    ID_KEYS = ("id", "contentuid", "contentuid_lc", "handle", "uid", "guid")
+    TEXT_TAGS = ("string", "value", "text", "content", "_", "t", "v")
+
     total = 0
     pairs: Dict[str, str] = {}
+
     for node in root.iter():
-        if "id" in node.attrib:
-            total += 1
-            text = (node.text or "").strip()
-            # 空は無視（=validに含めない）— UIへは件数として両方返す
-            if text != "":
-                pairs[node.attrib["id"]] = text
+        # どれかのID属性を拾う
+        node_id = None
+        for k in ID_KEYS:
+            if k in node.attrib:
+                node_id = node.attrib[k]
+                break
+        if not node_id:
+            continue
+
+        total += 1
+
+        # テキストを探す：直下 text → 子要素の代表タグ → 最後は node.itertext()
+        txt = (node.text or "").strip()
+
+        if not txt:
+            for tname in TEXT_TAGS:
+                child = node.find(tname)
+                if child is not None:
+                    c = (child.text or "").strip()
+                    if c:
+                        txt = c
+                        break
+
+        if not txt:
+            # それでも無いならノード以下のテキストを総なめ（空白寄せ集めは除外）
+            itxt = "".join(s for s in node.itertext())
+            itxt = itxt.strip()
+            # あまりにも長いゴミを避けるため軽く正規化
+            if itxt:
+                txt = itxt
+
+        if txt != "":
+            pairs[node_id] = txt
+
     return total, pairs
 
 @app.post("/import/xml")
