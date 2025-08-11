@@ -334,6 +334,56 @@ function initSearchBindings(){
 }
 initSearchBindings();
 
+/* ===== Import (XML) ===== */
+function initImportBindings(){
+  const btn = document.getElementById('btnXML');
+  const st  = document.getElementById('importStatus');
+  if(!btn) return;
+
+  btn.onclick = async ()=>{
+    const en = document.getElementById('xmlEN').files[0];
+    const ja = document.getElementById('xmlJA').files[0];
+    const srcEN = document.getElementById('srcEN').value || 'Loca EN';
+    const srcJA = document.getElementById('srcJA').value || 'Loca JP';
+    const prio  = document.getElementById('prioXML').value || '100';
+
+    if(!en || !ja){ st.textContent = 'EN/JA の XML を選択してください'; return; }
+
+    const fd = new FormData();
+    fd.append('enfile', en);
+    fd.append('jafile', ja);
+    fd.append('src_en', srcEN);
+    fd.append('src_ja', srcJA);
+    fd.append('priority', prio);
+
+    st.textContent = `アップロード中… (${en.name}, ${ja.name})`;
+    console.log('[IMPORT/XML] start', {en:en.name,sizeEN:en.size, ja:ja.name,sizeJA:ja.size, srcEN, srcJA, prio});
+
+    try{
+      const res = await fetch('/import/xml', { method:'POST', body: fd });
+      if(!res.ok){
+        const t = await res.text();
+        throw new Error(`HTTP ${res.status}: ${t}`);
+      }
+      const data = await res.json();
+      console.log('[IMPORT/XML] done', data);
+      st.textContent = `取り込み完了: ${data.inserted} 行 (source=${data.source_name})`;
+
+      // ソース一覧を更新（フィルタに反映）
+      try{
+        const sres = await fetch('/sources');
+        const sdata = await sres.json();
+        renderSourcesMenu(sdata.sources || []);
+      }catch(e){ console.warn('sources refresh failed', e); }
+
+    }catch(err){
+      console.error('[IMPORT/XML] error', err);
+      st.textContent = `エラー: ${err.message}`;
+    }
+  };
+}
+
+
 /* ===== Query ===== */
 async function runQuery(){
   const lines = $('#terms').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
@@ -445,3 +495,4 @@ $('#dlCSV').onclick = ()=>{ if(!window._lastQuery) return;
   const txt = buildWithPrompt(toCSV(window._lastQuery), 'csv');
   downloadText('query_export.csv', txt, 'text/csv');
 };
+initImportBindings();
