@@ -2,92 +2,80 @@
 <html lang="ja">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Translation DB Tool — 照会モード</title>
-<style>
-body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:24px;max-width:1100px}
-textarea{width:100%;height:180px}
-button{padding:8px 14px;margin-right:8px}
-table{width:100%;border-collapse:collapse;margin-top:12px}
-th,td{border:1px solid #ddd;padding:6px 8px;vertical-align:top}
-code{background:#f6f6f6;padding:2px 4px;border-radius:4px}
-.small{opacity:.7;font-size:.9em}
-</style>
-<h1>照会モード</h1>
+<title>Translation DB Tool</title>
+<link rel="stylesheet" href="app.css">
+<body>
+<header>
+  <div>
+    <h1>Translation DB Tool</h1>
+    <small>超シンプル・ローカル辞書照会 (CSV &amp; XML / SQLite / FTS5)</small>
+  </div>
+  <div class="row">
+    <button id="themeBtn" title="テーマ切替">🌓 テーマ</button>
+    <a href="/health" target="_blank"><button title="生存確認">/health</button></a>
+  </div>
+</header>
 
-<label class="small">改行区切りで語/フレーズを貼ってください</label>
-<textarea id="terms" placeholder="saving throw\nability check\nMind Sliver"></textarea>
+<main class="grid">
+  <nav aria-label="モード切替">
+    <button class="tab" id="tab-search" aria-selected="true">検索（一覧）</button>
+    <button class="tab" id="tab-query" aria-selected="false">照会（LLM補助）</button>
+  </nav>
 
-<div style="margin:8px 0;">
-  Top-K:
-  <input id="topk" type="number" value="3" min="1" max="5" style="width:60px;">
-  <button id="run">照会する</button>
-  <button id="copyJsonl">JSONLコピー</button>
-  <button id="copyTsv">TSVコピー</button>
-  <span id="status" class="small"></span>
-</div>
+  <!-- 検索タブ -->
+  <section id="panel-search" class="card" role="tabpanel" aria-labelledby="tab-search">
+    <div class="row">
+      <input id="q" type="text" placeholder="例: saving throw" style="min-width:280px">
+      <label>size <input id="size" type="number" value="20" min="1" max="200" style="width:80px"></label>
+      <button id="btnSearch">検索</button>
+      <small class="muted" id="searchStatus"></small>
+      <span class="right"></span>
+      <button id="copyTable">表コピー（TSV）</button>
+    </div>
+    <div id="searchTableWrap" style="overflow:auto;max-height:60vh">
+      <table id="searchTable" hidden>
+        <thead><tr><th>ID</th><th>EN</th><th>JA</th><th>score</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
 
-<table id="tbl" hidden>
-  <thead>
-    <tr><th>Term</th><th>候補1</th><th>候補2</th><th>候補3</th></tr>
-  </thead>
-  <tbody></tbody>
-</table>
+  <!-- 照会タブ -->
+  <section id="panel-query" class="card" role="tabpanel" aria-labelledby="tab-query" hidden>
+    <div class="grid cols-2">
+      <div>
+        <div class="row">
+          <label>Top-K <input id="topk" type="number" value="3" min="1" max="5" style="width:80px"></label>
+          <button id="btnRun">照会する</button>
+          <small class="muted" id="queryStatus"></small>
+        </div>
+        <label class="muted">改行区切りで語/フレーズを貼る</label>
+        <textarea id="terms" placeholder="saving throw&#10;ability check&#10;Mind Sliver"></textarea>
+        <div class="row">
+          <button id="copyJSONL">JSONLコピー</button>
+          <button id="copyTSV">TSVコピー</button>
+          <small class="muted">（<kbd>EN</kbd>, <kbd>JA</kbd> を LLM へ最小形式で渡す用）</small>
+        </div>
+      </div>
+      <div>
+        <div id="queryTableWrap" style="overflow:auto;max-height:60vh">
+          <table id="queryTable" hidden>
+            <thead>
+              <tr><th>Term</th><th>候補1</th><th>候補2</th><th>候補3</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
 
-<script>
-const $ = (s)=>document.querySelector(s);
+<footer>
+  <div>Local DB: <code class="mono">data/app.sqlite</code> ／ API: <code class="mono">/search</code>, <code class="mono">/query</code></div>
+  <div>ダークテーマは右上の 🌓 で切替（保存されます）</div>
+</footer>
 
-function toJSONL(rows){
-  return rows.map(r=>{
-    const c = r.candidates.map(pair=>[String(pair[0]||''), String(pair[1]||'')]);
-    return JSON.stringify({term:r.term,candidates:c});
-  }).join("\n");
-}
-function toTSV(rows){
-  const head = ["term","EN1","JA1","EN2","JA2","EN3","JA3"];
-  const body = rows.map(r=>{
-    const flat = (r.candidates||[]).flat();
-    while(flat.length<6) flat.push("");
-    return [r.term, ...flat.slice(0,6)].map(x=>String(x).replaceAll("\t"," ")).join("\t");
-  });
-  return [head.join("\t"), ...body].join("\n");
-}
-
-async function runQuery(){
-  const lines = $("#terms").value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-  const top_k = Math.max(1, Math.min(5, Number($("#topk").value)||3));
-  $("#status").textContent = "照会中...";
-  const res = await fetch("/query",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lines, top_k})});
-  const data = await res.json();
-  $("#status").textContent = `件数 ${data.length}`;
-  renderTable(data);
-  window._last = data;
-}
-function renderTable(rows){
-  const tb = $("#tbl tbody");
-  tb.innerHTML = "";
-  rows.forEach(r=>{
-    const tr = document.createElement("tr");
-    const td0 = document.createElement("td"); td0.textContent = r.term; tr.appendChild(td0);
-    for(let i=0;i<3;i++){
-      const td = document.createElement("td");
-      const pair = (r.candidates||[])[i];
-      td.innerHTML = pair ? `<div><code>${pair[0]||""}</code></div><div>${pair[1]||""}</div>` : "";
-      tr.appendChild(td);
-    }
-    tb.appendChild(tr);
-  });
-  $("#tbl").hidden = rows.length===0;
-}
-$("#run").onclick = runQuery;
-$("#copyJsonl").onclick = ()=>{
-  if(!window._last){return}
-  navigator.clipboard.writeText(toJSONL(window._last));
-  $("#status").textContent = "JSONLをコピーしました";
-};
-$("#copyTsv").onclick = ()=>{
-  if(!window._last){return}
-  navigator.clipboard.writeText(toTSV(window._last));
-  $("#status").textContent = "TSVをコピーしました";
-};
-</script>
+<script defer src="app.js"></script>
+</body>
 </html>

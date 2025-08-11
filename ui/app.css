@@ -1,0 +1,36 @@
+:root{
+  --bg:#ffffff; --fg:#111; --muted:#666; --line:#ddd; --accent:#0366d6;
+  --code:#f6f6f6; --btn:#f2f2f2;
+}
+:root[data-theme="dark"]{
+  --bg:#0f1115; --fg:#e6e6e6; --muted:#9aa0a6; --line:#2a2e36; --accent:#6aa9ff;
+  --code:#1a1d24; --btn:#1b1f29;
+}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+a{color:var(--accent);text-decoration:none}
+header,main,footer{max-width:1100px;margin:0 auto;padding:16px}
+header{border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;justify-content:space-between}
+h1{font-size:20px;margin:0}
+small{color:var(--muted)}
+button,input,select,textarea{font:inherit}
+button{background:var(--btn);border:1px solid var(--line);padding:6px 10px;border-radius:6px;cursor:pointer}
+button:hover{filter:brightness(0.98)}
+input[type="number"],input[type="text"]{border:1px solid var(--line);background:transparent;color:inherit;border-radius:6px;padding:6px 8px}
+textarea{width:100%;border:1px solid var(--line);background:transparent;color:inherit;border-radius:6px;padding:8px}
+kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code);border:1px solid var(--line);padding:0 6px;border-radius:4px}
+nav{display:flex;gap:8px;flex-wrap:wrap}
+.tab{padding:6px 10px;border:1px solid var(--line);border-bottom:none;border-radius:6px 6px 0 0;background:var(--btn);cursor:pointer}
+.tab[aria-selected="true"]{background:transparent;border-bottom:1px solid var(--bg);font-weight:600}
+.card{border:1px solid var(--line);border-radius:8px;padding:12px;background:transparent}
+.grid{display:grid;gap:12px}
+@media (min-width: 900px){ .cols-2{grid-template-columns:1fr 1fr} }
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{border:1px solid var(--line);padding:6px 8px;vertical-align:top}
+th{background:var(--btn);text-align:left}
+code{background:var(--code);padding:2px 4px;border-radius:4px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.muted{color:var(--muted)}
+.right{margin-left:auto}
+footer{border-top:1px solid var(--line);color:var(--muted);font-size:13px}
