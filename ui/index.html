@@ -51,13 +51,13 @@
   <section id="panel-query" class="card" role="tabpanel" aria-labelledby="tab-query">
     <div class="form-row">
       <label class="inline">Top-K
-        <input id="topk" type="number" value="3" min="1" max="5">
+        <input id="topk" type="number" value="3" min="1" max="10">
       </label>
       <label class="inline">max_len
         <input id="maxlen" type="number" value="240" min="0" max="1000" title="0 で無制限">
       </label>
       <label class="inline"><input id="exact" type="checkbox" checked> 完全一致優先</label>
-      <label class="inline"><input id="wb" type="checkbox"> 単語境界（フレーズは推奨）</label>
+      <label class="inline"><input id="wb" type="checkbox"> 単語境界（厳密）</label>
       <label class="inline">min_priority
         <input id="minprio" type="number" value="" placeholder="">
       </label>
@@ -65,12 +65,15 @@
         <button id="btnRun" class="primary">照会する</button>
         <button id="copyJSONL">JSONLコピー</button>
         <button id="copyTSV">TSVコピー</button>
+        <button id="dlJSONL">JSONL保存</button>
+        <button id="dlTSV">TSV保存</button>
+        <button id="dlCSV">CSV保存</button>
       </div>
       <div class="status" id="queryStatus"></div>
     </div>
 
     <label class="hint">ソース名フィルタ（カンマ区切り、空なら全件）</label>
-    <input id="sources" type="text" placeholder="例: BG3 Official, Loca EN/Loca JP" style="width:100%;max-width:720px">
+    <input id="sources" type="text" placeholder="例: BG3 Official, Loca XML" style="width:100%;max-width:720px">
 
     <label class="hint">改行区切りで語/フレーズを貼る（例：saving throw）</label>
     <textarea id="terms" class="terms" placeholder="saving throw&#10;ability check&#10;Mind Sliver"></textarea>
