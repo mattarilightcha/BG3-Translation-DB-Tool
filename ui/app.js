@@ -54,8 +54,6 @@ $('#tab-search').onclick  = ()=>showTab('search');
 $('#tab-query').onclick   = ()=>showTab('query');
 $('#tab-import').onclick  = ()=>showTab('import');
 $('#tab-prompts').onclick = ()=>showTab('prompts');
-showTab('query'); // default
-$('#managePrompts').onclick = ()=>showTab('prompts');
 
 /* ===== Root: Source multiselect ===== */
 let SELECTED_SOURCES = new Set();
@@ -63,54 +61,72 @@ let SELECTED_SOURCES = new Set();
 function renderSourcesMenu(list){
   const saved = JSON.parse(localStorage.getItem('tdb-sources')||'[]');
   if(saved.length){ SELECTED_SOURCES = new Set(saved); }
-  const box = $('#srcList'); box.innerHTML = '';
-  for(const s of list){
-    const id = 'src_' + btoa(encodeURIComponent(s.name)).replace(/=+$/,'');
-    const row = document.createElement('div');
-    row.innerHTML = `
-      <label for="${id}">
-        <span title="${escapeHtml(s.name)}">${escapeHtml(s.name||'(empty)')}</span>
-        <span class="count">${s.count}</span>
-      </label>`;
-    const input = document.createElement('input');
-    input.type='checkbox'; input.id=id; input.value=s.name;
-    input.checked = (SELECTED_SOURCES.size===0) ? true : SELECTED_SOURCES.has(s.name);
-    input.style.marginRight='8px';
-    row.querySelector('label').prepend(input);
-    box.appendChild(row);
+  const box = $('#srcList'); if(box){ box.innerHTML = '';
+    for(const s of list){
+      const id = 'src_' + btoa(encodeURIComponent(s.name)).replace(/=+$/,'');
+      const row = document.createElement('div');
+      row.innerHTML = `
+        <label for="${id}">
+          <span title="${escapeHtml(s.name)}">${escapeHtml(s.name||'(empty)')}</span>
+          <span class="count">${s.count}</span>
+        </label>`;
+      const input = document.createElement('input');
+      input.type='checkbox'; input.id=id; input.value=s.name;
+      input.checked = (SELECTED_SOURCES.size===0) ? true : SELECTED_SOURCES.has(s.name);
+      input.style.marginRight='8px';
+      row.querySelector('label').prepend(input);
+      box.appendChild(row);
+    }
+    updateSourceSummary();
   }
-  updateSourceSummary();
 }
 function updateSourceSummary(){
   const arr = [...SELECTED_SOURCES];
-  $('#srcSummary').textContent = arr.length ? `選択: ${arr.join(', ')}` : '選択: 全ソース';
+  const sum = $('#srcSummary'); if(sum) sum.textContent = arr.length ? `選択: ${arr.join(', ')}` : '選択: 全ソース';
   localStorage.setItem('tdb-sources', JSON.stringify(arr));
 }
 
-$('#srcBtn').onclick = ()=>{ $('#srcMenu').hidden = !$('#srcMenu').hidden; };
+$('#srcBtn')?.addEventListener('click', ()=>{ $('#srcMenu').hidden = !$('#srcMenu').hidden; });
 document.addEventListener('click', (e)=>{
-  if(!$('#srcMenu').hidden && !$('#srcMenu').contains(e.target) && e.target!==$('#srcBtn')){
+  if($('#srcMenu') && !$('#srcMenu').hidden && !$('#srcMenu').contains(e.target) && e.target!==$('#srcBtn')){
     $('#srcMenu').hidden = true;
   }
 });
-$('#srcAll').onclick = ()=>{
+$('#srcAll')?.addEventListener('click', ()=>{
   SELECTED_SOURCES = new Set([...$('#srcList').querySelectorAll('input[type=checkbox]')].map(c=>c.value));
   [...$('#srcList').querySelectorAll('input[type=checkbox]')].forEach(c=>c.checked=true);
-};
-$('#srcNone').onclick = ()=>{
+});
+$('#srcNone')?.addEventListener('click', ()=>{
   SELECTED_SOURCES = new Set();
   [...$('#srcList').querySelectorAll('input[type=checkbox]')].forEach(c=>c.checked=false);
-};
-$('#srcApply').onclick = ()=>{
+});
+$('#srcApply')?.addEventListener('click', ()=>{
   const checked = [...$('#srcList').querySelectorAll('input[type=checkbox]:checked')].map(c=>c.value);
   SELECTED_SOURCES = new Set(checked);
   updateSourceSummary();
   $('#srcMenu').hidden = true;
-};
+});
 (async function loadSources(){
   try{ const res = await fetch('/sources'); const data = await res.json(); renderSourcesMenu(data.sources||[]); }
   catch(e){ console.error(e); }
 })();
+
+/* ===== Prompts (省略: 今までのまま) ===== */
+const PROMPTS_KEY = 'tdb-prompts';
+const PROMPT_ACTIVE_KEY = 'tdb-prompt-active';
+function loadPrompts(){ let arr=[]; try{ arr = JSON.parse(localStorage.getItem(PROMPTS_KEY) || '[]'); }catch{} if(!arr.length){ arr=[{id:'p1',name:'Gemini翻訳補助（最小）',body:`以下は候補辞書（TSV）です。優先して一致を参照し、固有名詞は統一してください。
+出力は原文の文意を尊重しつつ自然な日本語に。辞書に該当が無い場合のみ推測可。`},{id:'p2',name:'用語固定・丁寧口調',body:`候補辞書を最優先で採用。既出用語は徹底して統一。
+文体は「です・ます」。意訳し過ぎず、ゲームのUIに収まる簡潔さを重視。`}]; localStorage.setItem(PROMPTS_KEY, JSON.stringify(arr)); localStorage.setItem(PROMPT_ACTIVE_KEY,'p1'); } return arr;}
+function savePrompts(a){ localStorage.setItem(PROMPTS_KEY, JSON.stringify(a));}
+function activePromptId(){ return localStorage.getItem(PROMPT_ACTIVE_KEY) || (loadPrompts()[0]?.id || ''); }
+function setActivePrompt(id){ localStorage.setItem(PROMPT_ACTIVE_KEY, id); renderPromptSelect(); renderPromptList(); }
+function getPromptById(id){ return loadPrompts().find(p=>p.id===id) || null; }
+function renderPromptSelect(){ const sel=$('#promptSelect'); if(!sel) return; const arr=loadPrompts(); const act=activePromptId(); sel.innerHTML = arr.map(p=>`<option value="${p.id}" ${p.id===act?'selected':''}>${escapeHtml(p.name)}</option>`).join(''); }
+function renderPromptList(){ const ul=$('#promptsUl'); if(!ul) return; ul.innerHTML=''; const arr=loadPrompts(); const act=activePromptId(); for(const p of arr){ const li=document.createElement('li'); li.innerHTML=`<span>${escapeHtml(p.name)}</span><span class="meta">${p.id===act?'既定':''}</span>`; li.onclick=()=>{ $('#pName').value=p.name; $('#pBody').value=p.body; $('#setDefault').onclick=()=> setActivePrompt(p.id); $('#savePrompt').onclick=()=>{ const upd=loadPrompts().map(x=> x.id===p.id ? ({...x,name:$('#pName').value.trim()||x.name, body:$('#pBody').value}) : x ); savePrompts(upd); renderPromptList(); renderPromptSelect(); }; $('#deletePrompt').onclick=()=>{ const left=loadPrompts().filter(x=>x.id!==p.id); savePrompts(left); if(activePromptId()===p.id && left.length){ setActivePrompt(left[0].id); } renderPromptList(); renderPromptSelect(); $('#pName').value=''; $('#pBody').value=''; }; }; ul.appendChild(li);} }
+$('#newPrompt')?.addEventListener('click', ()=>{ const id='p'+Date.now(); const arr=loadPrompts(); arr.unshift({id,name:'新しいプロンプト',body:''}); savePrompts(arr); setActivePrompt(id); $('#pName').value='新しいプロンプト'; $('#pBody').value=''; renderPromptList(); renderPromptSelect(); showTab('prompts');});
+renderPromptSelect(); renderPromptList();
+$('#promptSelect')?.addEventListener('change', (e)=> setActivePrompt(e.target.value));
+$('#managePrompts')?.addEventListener('click', ()=>showTab('prompts'));
 
 /* ===== Search ===== */
 async function doSearch(){
@@ -123,7 +139,7 @@ async function doSearch(){
   const url = new URL('/search', location.origin);
   url.searchParams.set('q', q);
   url.searchParams.set('size', String(size));
-  url.searchParams.set('max_len', '240');
+  url.searchParams.set('max_len', '0'); // 編集前提なのでフル本文を取得
   if(minp !== null) url.searchParams.set('min_priority', String(minp));
   for(const s of SELECTED_SOURCES){ url.searchParams.append('sources', s); }
 
@@ -132,108 +148,118 @@ async function doSearch(){
   renderSearchTable(data.items||[], q);
   $('#searchStatus').textContent = `表示 ${data.items?.length||0}`;
 }
+function searchRowView(r, q){
+  return `
+    <td>${r.id}</td>
+    <td class="col-en"><code>${highlightHtml(r.en||'', q)}</code></td>
+    <td class="col-ja">${highlightHtml(r.ja||'', q)}</td>
+    <td class="col-src"><input type="text" class="inline-src" value="${escapeHtml(r.source||'')}" disabled></td>
+    <td class="col-pri"><input type="number" class="inline-pri" value="${r.priority??''}" disabled></td>
+    <td>${Number(r.score).toFixed(2)}</td>
+    <td class="ops"><div class="btn-row">
+      <button class="btn-sm btn-edit">編集</button>
+    </div></td>`;
+}
+function searchRowEdit(r){
+  return `
+    <td>${r.id}</td>
+    <td class="col-en"><textarea class="edit-en">${escapeHtml(r.en||'')}</textarea></td>
+    <td class="col-ja"><textarea class="edit-ja">${escapeHtml(r.ja||'')}</textarea></td>
+    <td class="col-src"><input type="text" class="edit-src" value="${escapeHtml(r.source||'')}"></td>
+    <td class="col-pri"><input type="number" class="edit-pri" value="${r.priority??''}"></td>
+    <td>${Number(r.score).toFixed(2)}</td>
+    <td class="ops"><div class="btn-row">
+      <button class="btn-sm btn-save primary">保存</button>
+      <button class="btn-sm btn-cancel">取消</button>
+    </div></td>`;
+}
+
 function renderSearchTable(items, q){
   const t = $('#searchTable'); const tb = t.tBodies[0]; tb.innerHTML = '';
   for(const r of items){
     const tr = document.createElement('tr');
-    tr.innerHTML =
-      `<td>${r.id}</td>`+
-      `<td><code>${highlightHtml(r.en||'', q)}</code><div class="meta">${escapeHtml(r.source||'')}</div></td>`+
-      `<td>${highlightHtml(r.ja||'', q)}<div class="meta">${r.priority??''}</div></td>`+
-      `<td>${Number(r.score).toFixed(2)}</td>`;
+    tr.dataset.id = r.id;
+    tr.dataset.q = q;
+    tr.dataset.mode = 'view';
+    tr._data = r; // 元データを保持
+    tr.innerHTML = searchRowView(r, q);
     tb.appendChild(tr);
   }
   t.hidden = items.length===0;
 }
-$('#btnSearch').onclick = doSearch;
-$('#q').addEventListener('keydown', e=>{ if(e.key==='Enter') doSearch(); });
-$('#copyTable').onclick = ()=>{
-  const rows = [...$('#searchTable tbody').rows].map(tr=>[...tr.cells].map(td=>td.innerText));
-  if(!rows.length) return;
-  const tsv = ['ID\tEN\tJA\tscore', ...rows.map(r=>r.join('\t'))].join('\n');
-  navigator.clipboard.writeText(tsv);
-};
 
-/* ===== Prompts: storage & UI ===== */
-const PROMPTS_KEY = 'tdb-prompts';
-const PROMPT_ACTIVE_KEY = 'tdb-prompt-active';
+// 行イベント（編集/保存/取消）
+$('#searchTable').addEventListener('click', async (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  const tr = e.target.closest('tr'); if(!tr) return;
+  const r = tr._data;
 
-function loadPrompts(){
-  let arr = [];
-  try{ arr = JSON.parse(localStorage.getItem(PROMPTS_KEY) || '[]'); }catch{}
-  if(!arr.length){
-    arr = [
-      {
-        id: 'p1',
-        name: 'Gemini翻訳補助（最小）',
-        body:
-`以下は候補辞書（TSV）です。優先して一致を参照し、固有名詞は統一してください。
-出力は原文の文意を尊重しつつ自然な日本語に。辞書に該当が無い場合のみ推測可。`
-      },
-      {
-        id: 'p2',
-        name: '用語固定・丁寧口調',
-        body:
-`候補辞書を最優先で採用。既出用語は徹底して統一。
-文体は「です・ます」。意訳し過ぎず、ゲームのUIに収まる簡潔さを重視。`
+  if(btn.classList.contains('btn-edit')){
+    tr.dataset.mode = 'edit';
+    // 念のため最新値を取得（別画面で編集された時用）
+    try{
+      const res = await fetch(`/entry/${r.id}`); const full = await res.json();
+      if(full && !full.error){
+        r.en = full.en_text; r.ja = full.ja_text; r.source = full.source_name; r.priority = full.priority;
       }
-    ];
-    savePrompts(arr);
-    localStorage.setItem(PROMPT_ACTIVE_KEY, 'p1');
+    }catch{}
+    tr.innerHTML = searchRowEdit(r);
   }
-  return arr;
-}
-function savePrompts(arr){ localStorage.setItem(PROMPTS_KEY, JSON.stringify(arr)); }
-function activePromptId(){ return localStorage.getItem(PROMPT_ACTIVE_KEY) || (loadPrompts()[0]?.id || ''); }
-function setActivePrompt(id){ localStorage.setItem(PROMPT_ACTIVE_KEY, id); renderPromptSelect(); renderPromptList(); }
 
-function getPromptById(id){
-  return loadPrompts().find(p=>p.id===id) || null;
-}
-function renderPromptSelect(){
-  const sel = $('#promptSelect');
-  const arr = loadPrompts();
-  const act = activePromptId();
-  sel.innerHTML = arr.map(p=>`<option value="${p.id}" ${p.id===act?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
-}
-function renderPromptList(){
-  const ul = $('#promptsUl'); ul.innerHTML = '';
-  const arr = loadPrompts(); const act = activePromptId();
-  for(const p of arr){
-    const li = document.createElement('li');
-    li.innerHTML = `<span>${escapeHtml(p.name)}</span><span class="meta">${p.id===act?'既定':''}</span>`;
-    li.onclick = ()=>{
-      $('#pName').value = p.name;
-      $('#pBody').value = p.body;
-      $('#setDefault').onclick = ()=> setActivePrompt(p.id);
-      $('#savePrompt').onclick = ()=> {
-        const updated = loadPrompts().map(x=> x.id===p.id ? ({...x, name:$('#pName').value.trim()||x.name, body:$('#pBody').value}) : x );
-        savePrompts(updated); renderPromptList(); renderPromptSelect();
-      };
-      $('#deletePrompt').onclick = ()=> {
-        const left = loadPrompts().filter(x=>x.id!==p.id);
-        savePrompts(left);
-        if(activePromptId()===p.id && left.length){ setActivePrompt(left[0].id); }
-        renderPromptList(); renderPromptSelect();
-        $('#pName').value=''; $('#pBody').value='';
-      };
+  if(btn.classList.contains('btn-cancel')){
+    tr.dataset.mode = 'view';
+    tr.innerHTML = searchRowView(r, tr.dataset.q);
+  }
+
+  if(btn.classList.contains('btn-save')){
+    const payload = {
+      en_text: tr.querySelector('.edit-en').value,
+      ja_text: tr.querySelector('.edit-ja').value,
+      source_name: tr.querySelector('.edit-src').value,
+      priority: tr.querySelector('.edit-pri').value==='' ? null : Number(tr.querySelector('.edit-pri').value),
     };
-    ul.appendChild(li);
+    btn.disabled = true;
+    try{
+      const res = await fetch(`/entry/${r.id}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      const upd = await res.json();
+      if(upd && !upd.error){
+        // 表示データ更新
+        r.en = upd.en_text; r.ja = upd.ja_text; r.source = upd.source_name; r.priority = upd.priority;
+        tr.dataset.mode='view';
+        tr.innerHTML = searchRowView(r, tr.dataset.q);
+        $('#searchStatus').textContent = `保存しました (id=${r.id})`;
+      }else{
+        $('#searchStatus').textContent = `保存に失敗しました`;
+      }
+    }catch(err){
+      console.error(err);
+      $('#searchStatus').textContent = `保存エラー`;
+    }finally{
+      btn.disabled = false;
+    }
   }
-}
-$('#newPrompt').onclick = ()=>{
-  const id = 'p' + Date.now();
-  const arr = loadPrompts();
-  arr.unshift({id, name:'新しいプロンプト', body:''});
-  savePrompts(arr); setActivePrompt(id);
-  $('#pName').value='新しいプロンプト'; $('#pBody').value='';
-  renderPromptList(); renderPromptSelect(); showTab('prompts');
-};
-// 初期描画
-renderPromptSelect(); renderPromptList();
-$('#promptSelect').onchange = (e)=> setActivePrompt(e.target.value);
+});
 
-/* ===== Query ===== */
+// Enter / Ctrl+S で保存
+$('#searchTable').addEventListener('keydown', (e)=>{
+  const tr = e.target.closest('tr'); if(!tr) return;
+  if(tr.dataset.mode!=='edit') return;
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase()==='s'){ e.preventDefault(); tr.querySelector('.btn-save')?.click(); }
+});
+
+/* ===== Query（既存＋プロンプト前置＆エクスポート） ===== */
+function buildWithPrompt(rawText, kind){
+  const include = $('#includePrompt')?.checked;
+  if(!include) return rawText;
+  const p = getPromptById(activePromptId());
+  if(!p) return rawText;
+  if(kind==='jsonl'){
+    const meta = JSON.stringify({type:'prompt', name:p.name, prompt:p.body});
+    return meta + '\n' + rawText;
+  }
+  return `${p.name}\n${p.body}\n\n${rawText}`;
+}
+
 async function runQuery(){
   const lines = $('#terms').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
   const top_k = Math.max(1, Math.min(10, Number($('#topk').value)||3));
@@ -260,13 +286,11 @@ function renderQueryTable(rows, topk){
   const t = $('#queryTable');
   const tb = t.tBodies[0];
   tb.innerHTML = '';
-
   const thead = t.tHead;
   if (thead) {
     thead.rows[0].innerHTML = `<th style="width:20%">Term</th>` +
       Array.from({length: topk}, (_,i)=>`<th>候補${i+1}</th>`).join('');
   }
-
   for(const r of rows){
     const tr = document.createElement('tr');
     const tdTerm = document.createElement('td'); tdTerm.textContent = r.term; tr.appendChild(tdTerm);
@@ -288,12 +312,10 @@ function renderQueryTable(rows, topk){
   }
   t.hidden = rows.length===0;
 }
-$('#btnRun').onclick = runQuery;
+$('#btnRun')?.addEventListener('click', runQuery);
 
-/* ===== Exports with Prompt ===== */
-function toJSONL(rows){
-  return rows.map(r=>JSON.stringify(r)).join('\n');
-}
+// Exports
+function toJSONL(rows){ return rows.map(r=>JSON.stringify(r)).join('\n'); }
 function toTSV(rows, topk = Math.max(1, Number($('#topk').value)||3)){
   const head=['term']; for(let i=1;i<=topk;i++){ head.push(`EN${i}`,`JA${i}`,`SRC${i}`,`PRIO${i}`); }
   const body=(rows||[]).map(r=>{
@@ -315,70 +337,11 @@ function toCSV(rows, topk = Math.max(1, Number($('#topk').value)||3)){
   });
   return [head.map(esc).join(','), ...body].join('\n');
 }
+$('#copyJSONL')?.addEventListener('click', ()=>{ if(!window._lastQuery) return; const txt=buildWithPrompt(toJSONL(window._lastQuery), 'jsonl'); navigator.clipboard.writeText(txt); $('#queryStatus').textContent='JSONLコピー完了'; });
+$('#copyTSV')?.addEventListener('click', ()=>{ if(!window._lastQuery) return; const txt=buildWithPrompt(toTSV(window._lastQuery), 'tsv'); navigator.clipboard.writeText(txt); $('#queryStatus').textContent='TSVコピー完了'; });
+$('#dlJSONL')?.addEventListener('click', ()=>{ if(!window._lastQuery) return; const txt=buildWithPrompt(toJSONL(window._lastQuery), 'jsonl'); downloadText('query_export.jsonl', txt, 'application/json'); });
+$('#dlTSV')?.addEventListener('click', ()=>{ if(!window._lastQuery) return; const txt=buildWithPrompt(toTSV(window._lastQuery), 'tsv'); downloadText('query_export.tsv', txt, 'text/tab-separated-values'); });
+$('#dlCSV')?.addEventListener('click', ()=>{ if(!window._lastQuery) return; const txt=buildWithPrompt(toCSV(window._lastQuery), 'csv'); downloadText('query_export.csv', txt, 'text/csv'); });
 
-function buildWithPrompt(rawText, kind){
-  if(!$('#includePrompt').checked) return rawText;
-  const p = getPromptById(activePromptId());
-  if(!p) return rawText;
-
-  if(kind==='jsonl'){
-    const meta = JSON.stringify({type:'prompt', name:p.name, prompt:p.body});
-    return meta + '\n' + rawText; // 先頭に1行メタ
-  }
-  // tsv/csv はプレーンに前置
-  return `${p.name}\n${p.body}\n\n${rawText}`;
-}
-
-// Copy / Download
-$('#copyJSONL').onclick = ()=>{
-  if(!window._lastQuery) return;
-  const txt = buildWithPrompt(toJSONL(window._lastQuery), 'jsonl');
-  navigator.clipboard.writeText(txt); $('#queryStatus').textContent='JSONLコピー完了';
-};
-$('#copyTSV').onclick = ()=>{
-  if(!window._lastQuery) return;
-  const txt = buildWithPrompt(toTSV(window._lastQuery), 'tsv');
-  navigator.clipboard.writeText(txt); $('#queryStatus').textContent='TSVコピー完了';
-};
-$('#dlJSONL').onclick = ()=>{
-  if(!window._lastQuery) return;
-  const txt = buildWithPrompt(toJSONL(window._lastQuery), 'jsonl');
-  downloadText('query_export.jsonl', txt, 'application/json');
-};
-$('#dlTSV').onclick = ()=>{
-  if(!window._lastQuery) return;
-  const txt = buildWithPrompt(toTSV(window._lastQuery), 'tsv');
-  downloadText('query_export.tsv', txt, 'text/tab-separated-values');
-};
-$('#dlCSV').onclick = ()=>{
-  if(!window._lastQuery) return;
-  const txt = buildWithPrompt(toCSV(window._lastQuery), 'csv');
-  downloadText('query_export.csv', txt, 'text/csv');
-};
-
-/* ===== Import (XML) ===== */
-$('#btnXML').onclick = async ()=>{
-  const en = $('#xmlEN').files[0];
-  const ja = $('#xmlJA').files[0];
-  const srcEN = $('#srcEN').value.trim() || 'Loca EN';
-  const srcJA = $('#srcJA').value.trim() || 'Loca JP';
-  const prio = Number($('#prioXML').value)||100;
-  if(!en || !ja){ $('#importStatus').textContent='EN/JAのXMLを選んでください'; return; }
-  $('#importStatus').textContent='インポート中…（サイズにより時間がかかります）';
-
-  const fd = new FormData();
-  fd.append('enfile', en); fd.append('jafile', ja);
-  fd.append('src_en', srcEN); fd.append('src_ja', srcJA);
-  fd.append('priority', String(prio));
-
-  try{
-    const res = await fetch('/import/xml', {method:'POST', body: fd});
-    const data = await res.json();
-    $('#importStatus').textContent = `取り込み完了：${data.inserted} 行（source=${data.source_name}）`;
-    const srcRes = await fetch('/sources'); const srcData = await srcRes.json();
-    renderSourcesMenu(srcData.sources||[]);
-  }catch(e){
-    console.error(e);
-    $('#importStatus').textContent = 'エラー：インポートに失敗しました';
-  }
-};
+// 初期タブ
+showTab('query'); // デフォ

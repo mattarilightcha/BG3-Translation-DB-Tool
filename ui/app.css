@@ -107,3 +107,13 @@ mark{background:#fff17662;color:inherit;padding:0 2px;border-radius:2px}
 #promptsUl li{display:flex; justify-content:space-between; gap:8px; padding:6px 4px; border-bottom:1px solid var(--line)}
 #promptsUl li .meta{margin:0}
 @media (max-width:900px){ .prompt-grid{grid-template-columns:1fr} .prompt-list{border-right:none;padding-right:0} }
+
+/* === inline edit === */
+.table td input[type="text"], .table td textarea, .table td input[type="number"]{
+  width:100%;
+}
+.table td textarea{
+  min-height:72px; resize:vertical;
+}
+.btn-sm{ padding:4px 8px; font-size:12px; border-radius:6px; }
+.btn-row{ display:flex; gap:6px; flex-wrap:wrap; }
