@@ -347,7 +347,14 @@ function initImportBindings(){
     const srcJA = document.getElementById('srcJA').value || 'Loca JP';
     const prio  = document.getElementById('prioXML').value || '100';
 
-    if(!en || !ja){ st.textContent = 'EN/JA の XML を選択してください'; return; }
+    // 厳密モード（UI固定。変えたいならチェックボックスを追加してここで読む）
+    const strict = true;
+
+    if(!en || !ja){
+      st.textContent = 'EN/JA の XML を選択してください';
+      st.className = 'status error';
+      return;
+    }
 
     const fd = new FormData();
     fd.append('enfile', en);
@@ -355,19 +362,36 @@ function initImportBindings(){
     fd.append('src_en', srcEN);
     fd.append('src_ja', srcJA);
     fd.append('priority', prio);
+    fd.append('strict', String(strict));
 
     st.textContent = `アップロード中… (${en.name}, ${ja.name})`;
-    console.log('[IMPORT/XML] start', {en:en.name,sizeEN:en.size, ja:ja.name,sizeJA:ja.size, srcEN, srcJA, prio});
+    st.className = 'status info';
+    console.log('[IMPORT/XML] start', {en:en.name,sizeEN:en.size, ja:ja.name,sizeJA:ja.size, srcEN, srcJA, prio, strict});
 
     try{
       const res = await fetch('/import/xml', { method:'POST', body: fd });
+
+      // エラー詳細も読み取り、画面に出す
       if(!res.ok){
-        const t = await res.text();
-        throw new Error(`HTTP ${res.status}: ${t}`);
+        let payload = null;
+        try { payload = await res.json(); } catch{ payload = { detail: await res.text() }; }
+        console.error('[IMPORT/XML] HTTP error', res.status, payload);
+
+        const msg = typeof payload?.detail === 'object'
+          ? JSON.stringify(payload.detail, null, 2)
+          : String(payload?.detail || `HTTP ${res.status}`);
+
+        st.textContent = `エラー: ${msg}`;
+        st.className = 'status error';
+        return;
       }
+
       const data = await res.json();
       console.log('[IMPORT/XML] done', data);
-      st.textContent = `取り込み完了: ${data.inserted} 行 (source=${data.source_name})`;
+
+      st.textContent = `取り込み完了: ${data.inserted} 行 (source=${data.source_name})`
+        + ` / EN_valid=${data.en_valid}, JA_valid=${data.ja_valid}, 共通=${data.common_ids}, strict=${data.strict}`;
+      st.className = 'status ok';
 
       // ソース一覧を更新（フィルタに反映）
       try{
@@ -377,8 +401,9 @@ function initImportBindings(){
       }catch(e){ console.warn('sources refresh failed', e); }
 
     }catch(err){
-      console.error('[IMPORT/XML] error', err);
+      console.error('[IMPORT/XML] fetch error', err);
       st.textContent = `エラー: ${err.message}`;
+      st.className = 'status error';
     }
   };
 }
@@ -495,4 +520,5 @@ $('#dlCSV').onclick = ()=>{ if(!window._lastQuery) return;
   const txt = buildWithPrompt(toCSV(window._lastQuery), 'csv');
   downloadText('query_export.csv', txt, 'text/csv');
 };
+
 initImportBindings();
