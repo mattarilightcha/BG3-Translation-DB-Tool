@@ -35,6 +35,14 @@ function highlightHtml(text, term){
   const re = new RegExp(escReg(term), 'ig');
   return esc.replace(re, m=>`<mark>${m}</mark>`);
 }
+function downloadText(filename, content, mime='text/plain'){
+  const blob = new Blob([content], {type: mime + ';charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  a.remove(); URL.revokeObjectURL(url);
+}
 
 /* ===== Tabs ===== */
 function showTab(id){
@@ -58,7 +66,7 @@ async function doSearch(){
   const url = new URL('/search', location.origin);
   url.searchParams.set('q', q);
   url.searchParams.set('size', String(size));
-  url.searchParams.set('max_len', '240'); // ハイライトとスニペット
+  url.searchParams.set('max_len', '240'); // スニペット
   const res = await fetch(url);
   const data = await res.json();
   renderSearchTable(data.items||[], q);
@@ -89,7 +97,7 @@ $('#copyTable').onclick = ()=>{
 /* ===== Query ===== */
 async function runQuery(){
   const lines = $('#terms').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-  const top_k = Math.max(1, Math.min(5, Number($('#topk').value)||3));
+  const top_k = Math.max(1, Math.min(10, Number($('#topk').value)||3));
   const max_len = Math.max(0, Number($('#maxlen').value)||0);
   const exact = $('#exact').checked;
   const word_boundary = $('#wb').checked;
@@ -128,11 +136,16 @@ function renderQueryTable(rows, topk){
     const cands = r.candidates || [];
     for(let i=0;i<topk;i++){
       const td = document.createElement('td');
-      const p = cands[i];
+      const p = cands[i]; // [en, ja, source, priority]
       if(p){
         const en = snippetAround(r.term, p[0]);
         const ja = snippetAround(r.term, p[1]);
-        td.innerHTML = `<div><code>${highlightHtml(en, r.term)}</code></div><div>${highlightHtml(ja, r.term)}</div>`;
+        const src = p[2] || '';
+        const pr  = (p[3] ?? '') === '' ? '' : String(p[3]);
+        td.innerHTML =
+          `<div><code>${highlightHtml(en, r.term)}</code></div>`+
+          `<div>${highlightHtml(ja, r.term)}</div>`+
+          `<div class="meta">${escapeHtml(src)}${pr!=='' ? ' / prio '+pr : ''}</div>`;
       }
       tr.appendChild(td);
     }
@@ -144,18 +157,41 @@ function renderQueryTable(rows, topk){
 $('#btnRun').onclick = runQuery;
 
 function toJSONL(rows){
-  return rows.map(r=>{
-    const c=(r.candidates||[]).map(p=>[(p?.[0]||''),(p?.[1]||'')]); 
-    return JSON.stringify({term:r.term,candidates:c});
-  }).join('\n');
+  return rows.map(r=>JSON.stringify(r)).join('\n'); // 返却形式そのまま
 }
-function toTSV(rows){
-  const head=['term','EN1','JA1','EN2','JA2','EN3','JA3'];
+function toTSV(rows, topk = Math.max(1, Number($('#topk').value)||3)){
+  const head=['term'];
+  for(let i=1;i<=topk;i++){ head.push(`EN${i}`,`JA${i}`,`SRC${i}`,`PRIO${i}`); }
   const body=(rows||[]).map(r=>{
-    const flat=(r.candidates||[]).flat(); while(flat.length<6) flat.push('');
-    return [r.term,...flat.slice(0,6)].join('\t');
+    const flat=[];
+    for(let i=0;i<topk;i++){
+      const p=(r.candidates||[])[i]||['','','',''];
+      flat.push(p[0]||'', p[1]||'', p[2]||'', (p[3]??''));
+    }
+    return [r.term, ...flat].join('\t');
   });
   return [head.join('\t'),...body].join('\n');
 }
+function toCSV(rows, topk = Math.max(1, Number($('#topk').value)||3)){
+  const esc=(s)=> `"${String(s).replace(/"/g,'""')}"`;
+  const head=['term'];
+  for(let i=1;i<=topk;i++){ head.push(`EN${i}`,`JA${i}`,`SRC${i}`,`PRIO${i}`); }
+  const body=(rows||[]).map(r=>{
+    const flat=[];
+    for(let i=0;i<topk;i++){
+      const p=(r.candidates||[])[i]||['','','',''];
+      flat.push(p[0]||'', p[1]||'', p[2]||'', (p[3]??''));
+    }
+    return [r.term, ...flat].map(esc).join(',');
+  });
+  return [head.map(esc).join(','), ...body].join('\n');
+}
+
+// Copy
 $('#copyJSONL').onclick = ()=>{ if(window._lastQuery){ navigator.clipboard.writeText(toJSONL(window._lastQuery)); $('#queryStatus').textContent='JSONLコピー完了'; } };
 $('#copyTSV').onclick   = ()=>{ if(window._lastQuery){ navigator.clipboard.writeText(toTSV(window._lastQuery));   $('#queryStatus').textContent='TSVコピー完了';   } };
+
+// Download
+$('#dlJSONL').onclick = ()=>{ if(window._lastQuery){ downloadText('query_export.jsonl', toJSONL(window._lastQuery), 'application/json'); } };
+$('#dlTSV').onclick   = ()=>{ if(window._lastQuery){ downloadText('query_export.tsv',   toTSV(window._lastQuery),   'text/tab-separated-values'); } };
+$('#dlCSV').onclick   = ()=>{ if(window._lastQuery){ downloadText('query_export.csv',   toCSV(window._lastQuery),   'text/csv'); } };
