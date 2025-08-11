@@ -65,32 +65,38 @@ class QueryIn(BaseModel):
 @app.post("/query")
 def query(body: QueryIn):
     """
-    照会モード：各行のtermに対し、完全一致 優先 → FTSで補完。EN/JA候補をTop-K返す。
+    照会モード：各行のtermに対し、
+    完全一致 優先 → FTSで補完。
+    EN/JA候補をTop-K返す（重複除外）。
     """
     con = get_con()
     cur = con.cursor()
     out: List[Dict] = []
-
     seen_terms = set()
+
     for raw in body.lines:
         term = (raw or "").strip()
         if not term or term in seen_terms:
             continue
         seen_terms.add(term)
 
+        matches = []
+        seen_pairs = set()
+
         # 1) 完全一致（英語）
         cur.execute(
-            """
-            SELECT en_text, ja_text
-            FROM entry_pairs
-            WHERE lower(en_text) = lower(?)
-            LIMIT ?
-            """,
+            "SELECT en_text, ja_text FROM entry_pairs WHERE lower(en_text) = lower(?) LIMIT ?",
             (term, body.top_k),
         )
-        matches = [(r["en_text"] or "", r["ja_text"] or "") for r in cur.fetchall()]
+        for r in cur.fetchall():
+            pair = (r["en_text"] or "", r["ja_text"] or "")
+            if pair not in seen_pairs:
+                matches.append(pair)
+                seen_pairs.add(pair)
+            if len(matches) >= body.top_k:
+                break
 
-        # 2) 足りない分はFTSで補完（重複は除外）
+        # 2) 足りない分はFTSで補完
         remain = body.top_k - len(matches)
         if remain > 0:
             cur.execute(
@@ -101,9 +107,8 @@ def query(body: QueryIn):
                 WHERE entries_fts MATCH ?
                 LIMIT ?
                 """,
-                (term, remain * 3),  # ちょい多めに取得して重複を除外
+                (term, remain * 5),  # 少し多めに取って重複除外
             )
-            seen_pairs = set(matches)
             for r in cur.fetchall():
                 pair = (r["en"] or "", r["ja"] or "")
                 if pair not in seen_pairs:
@@ -112,7 +117,10 @@ def query(body: QueryIn):
                 if len(matches) >= body.top_k:
                     break
 
-        out.append({"term": term, "candidates": [[en, ja] for en, ja in matches]})
+        out.append({
+            "term": term,
+            "candidates": [[en, ja] for en, ja in matches]
+        })
 
     con.close()
     return out
