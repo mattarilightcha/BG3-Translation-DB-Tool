@@ -1,163 +1,64 @@
-/* ===== 全体レイアウト ===== */
-html, body {
-  margin: 0;
-  padding: 0;
-  font-family: sans-serif;
-  background-color: var(--bg);
-  color: var(--fg);
-  height: 100%;
+/* ===== Theme Vars ===== */
+:root{
+  --bg:#ffffff; --fg:#111; --muted:#666; --line:#dee2e6; --accent:#2f6feb;
+  --code:#f6f8fa; --btn:#f3f4f6; --btn-hover:#e9eaee; --danger:#d33;
+  --card:#fff; --shadow:0 1px 3px rgba(0,0,0,.06);
+}
+:root[data-theme="dark"]{
+  --bg:#1c2027; --fg:#f2f4f8; --muted:#b0b6c2; --line:#2f3640; --accent:#79b0ff;
+  --code:#242a33; --btn:#2b3240; --btn-hover:#343c4d; --danger:#ff6b6b;
+  --card:#232832; --shadow:0 1px 3px rgba(0,0,0,.3);
 }
 
-/* 変数（ライトテーマ） */
-:root {
-  --bg: #ffffff;
-  --fg: #111111;
-  --muted: #555555;
-  --line: #dddddd;
-  --accent: #0078d7;
-  --code: #f5f5f5;
-  --btn: #f0f0f0;
-}
+/* ===== Base ===== */
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,-apple-system,Segoe UI,Arial,sans-serif}
 
-/* 変数（ダークテーマ） */
-:root[data-theme="dark"] {
-  --bg: #181a20;
-  --fg: #f0f2f6;
-  --muted: #b0b6c2;
-  --line: #2e333d;
-  --accent: #79b0ff;
-  --code: #22252e;
-  --btn: #2d3440;
-}
+/* Header */
+.app-header{position:sticky;top:0;z-index:10;display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--bg);backdrop-filter:saturate(1.2)}
+.brand h1{margin:0;font-size:18px}
+.brand small{color:var(--muted)}
+.actions{display:flex;gap:8px;align-items:center}
+a.ghost{display:inline-flex;align-items:center;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--btn);color:var(--fg);text-decoration:none}
+a.ghost:hover{background:var(--btn-hover)}
 
-/* ヘッダー */
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--line);
-  background-color: var(--bg);
-  position: sticky;
-  top: 0;
-}
+/* Layout */
+.container{max-width:1100px;margin:16px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:16px}
 
-/* タイトル */
-header h1 {
-  font-size: 1.2rem;
-  margin: 0;
-}
+/* Tabs */
+.tabs{display:flex;gap:8px;margin:0 0 12px}
+.tab{padding:8px 12px;background:var(--btn);border:1px solid var(--line);border-bottom:2px solid transparent;border-radius:8px;cursor:pointer;color:var(--fg)}
+.tab[aria-selected="true"]{background:var(--card);border-color:var(--line);border-bottom:2px solid var(--accent);font-weight:600}
 
-/* ボタン */
-button {
-  background-color: var(--btn);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  padding: 0.4rem 0.8rem;
-  cursor: pointer;
-  border-radius: 4px;
-}
-button:hover {
-  background-color: #3a4150;
-}
-:root:not([data-theme="dark"]) button:hover {
-  background-color: #e0e0e0;
-}
+/* Form rows */
+.form-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:10px}
+.form-row .inline{display:flex;gap:8px;align-items:center}
+input[type="text"],input[type="number"],textarea,select{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+input[type="text"],input[type="number"]{min-width:180px}
+.terms{width:100%;min-height:520px;resize:vertical}
 
-/* 入力欄・テキストエリア */
-input, textarea, select {
-  background-color: #fff;
-  color: #111;
-  border: 1px solid var(--line);
-  padding: 0.3rem;
-  border-radius: 4px;
-}
-:root[data-theme="dark"] input,
-:root[data-theme="dark"] textarea,
-:root[data-theme="dark"] select {
-  background-color: #20232b;
-  color: var(--fg);
-}
+/* Buttons */
+button{background:var(--btn);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+button:hover{background:var(--btn-hover)}
+button.primary{background:var(--accent);border-color:transparent;color:#fff}
+button.primary:hover{filter:brightness(.95)}
+.btn-group{display:flex;gap:8px}
 
-/* タブコンテナ */
-.tabs {
-  display: flex;
-  border-bottom: 1px solid var(--line);
-}
+/* Table */
+.table{width:100%;border-collapse:collapse}
+.table thead th{position:sticky;top:0;background:var(--btn)}
+.table th,.table td{border:1px solid var(--line);padding:8px;vertical-align:top}
+.table-wrap{margin-top:10px;max-height:60vh;overflow:auto}
+code{background:var(--code);padding:2px 6px;border-radius:6px}
 
-/* タブ */
-.tab {
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  border: none;
-  background: transparent;
-  border-bottom: 2px solid transparent;
-  color: var(--fg);
-}
-.tab[aria-selected="true"] {
-  border-bottom: 2px solid var(--accent);
-  background-color: var(--btn);
-}
+/* Minor */
+.hint{color:var(--muted);display:block;margin:4px 0 6px}
+.status{margin-left:auto;color:var(--muted)}
+mark{background:#fff176;color:inherit;padding:0 2px;border-radius:2px}
 
-/* メインコンテンツ */
-main {
-  padding: 1rem;
-}
-
-/* テーブル */
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-th, td {
-  border: 1px solid var(--line);
-  padding: 0.4rem;
-  vertical-align: top;
-}
-th {
-  background-color: var(--btn);
-}
-
-/* コードブロック */
-code {
-  background-color: var(--code);
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
-}
-
-/* スクロール可能領域 */
-.scroll {
-  overflow-y: auto;
-}
-
-/* 縦横レイアウト調整 */
-.flex {
-  display: flex;
-  gap: 1rem;
-}
-.flex-col {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-/* ===== ダークテーマ専用調整 ===== */
-:root[data-theme="dark"] body,
-:root[data-theme="dark"] table,
-:root[data-theme="dark"] th,
-:root[data-theme="dark"] td,
-:root[data-theme="dark"] input,
-:root[data-theme="dark"] textarea,
-:root[data-theme="dark"] select,
-:root[data-theme="dark"] button,
-:root[data-theme="dark"] .tab {
-  color: var(--fg);
-}
-
-:root[data-theme="dark"] th {
-  background-color: var(--btn);
-}
-
-:root[data-theme="dark"] code {
-  background-color: var(--code);
+/* Mobile */
+@media (max-width:720px){
+  input[type="text"]{min-width:140px}
 }
