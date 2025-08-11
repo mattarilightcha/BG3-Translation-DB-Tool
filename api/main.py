@@ -280,13 +280,17 @@ async def import_xml(
     src_ja: str = Form("Loca JP"),
     priority: int = Form(100),
 ):
+    print(f"[IMPORT/XML] recv en={enfile.filename} ja={jafile.filename} "
+          f"src_en={src_en} src_ja={src_ja} prio={priority}")
+
     en_bytes = await enfile.read()
     ja_bytes = await jafile.read()
+    print(f"[IMPORT/XML] sizes: en={len(en_bytes)} bytes, ja={len(ja_bytes)} bytes")
+
     en_root = ET.parse(io.BytesIO(en_bytes)).getroot()
     ja_root = ET.parse(io.BytesIO(ja_bytes)).getroot()
 
     def extract_pairs(root):
-        # BG3 の loca.xml 想定： <content id="SomeId">Text</content> のような形を拾う
         pairs = {}
         for node in root.iter():
             if node.attrib.get("id"):
@@ -296,6 +300,7 @@ async def import_xml(
 
     en_map = extract_pairs(en_root)
     ja_map = extract_pairs(ja_root)
+    print(f"[IMPORT/XML] parsed: EN keys={len(en_map)} JA keys={len(ja_map)}")
 
     inserted = 0
     with acquire_con() as con:
@@ -310,4 +315,5 @@ async def import_xml(
             _update_fts_for_id(cur, rowid, en_text or "", ja_text or "")
             inserted += 1
         con.commit()
+    print(f"[IMPORT/XML] inserted={inserted}")
     return {"inserted": inserted, "source_name": f"XML:{src_en}|{src_ja}"}
