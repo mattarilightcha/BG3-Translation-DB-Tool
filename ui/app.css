@@ -20,15 +20,15 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,-appl
 .brand h1{margin:0;font-size:18px}
 .brand small{color:var(--muted)}
 .actions{display:flex;gap:8px;align-items:center}
-a.ghost{display:inline-flex;align-items:center;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--btn);color:var(--fg);text-decoration:none}
-a.ghost:hover{background:var(--btn-hover)}
+a.ghost, button.ghost{display:inline-flex;align-items:center;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--btn);color:var(--fg);text-decoration:none}
+a.ghost:hover, button.ghost:hover{background:var(--btn-hover)}
 
 /* Layout */
 .container{max-width:1100px;margin:16px auto;padding:0 16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:16px}
 
 /* Tabs */
-.tabs{display:flex;gap:8px;margin:0 0 12px}
+.tabs{display:flex;gap:8px;margin:12px 0}
 .tab{padding:8px 12px;background:var(--btn);border:1px solid var(--line);border-bottom:2px solid transparent;border-radius:8px;cursor:pointer;color:var(--fg)}
 .tab[aria-selected="true"]{background:var(--card);border-color:var(--line);border-bottom:2px solid var(--accent);font-weight:600}
 
@@ -53,6 +53,14 @@ button.primary:hover{filter:brightness(.95)}
 .table-wrap{margin-top:10px;max-height:60vh;overflow:auto}
 code{background:var(--code);padding:2px 6px;border-radius:6px}
 .meta{font-size:12px;color:var(--muted);margin-top:2px}
+
+/* Root filter dropdown */
+.multisel{position:relative}
+.menu{position:absolute;top:40px;left:0;z-index:20;background:var(--card);border:1px solid var(--line);border-radius:8px;min-width:320px;box-shadow:var(--shadow);padding:8px}
+.menu-head{display:flex;gap:8px;margin-bottom:8px}
+.menu-list{max-height:40vh;overflow:auto;border-top:1px solid var(--line);padding-top:8px}
+.menu-list label{display:flex;justify-content:space-between;gap:12px;padding:6px 4px}
+.menu-list .count{color:var(--muted)}
 
 /* Minor */
 .hint{color:var(--muted);display:block;margin:4px 0 6px}
