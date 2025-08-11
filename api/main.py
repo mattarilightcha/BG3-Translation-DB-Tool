@@ -1,362 +1,237 @@
-from fastapi import FastAPI, UploadFile, File, Form, Query
-from fastapi.staticfiles import StaticFiles
+# api/main.py
+from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import List, Dict, Optional, Tuple
-import sqlite3, re, unicodedata, os, tempfile, threading, time, webbrowser
-from queue import Queue
-from contextlib import contextmanager
+from typing import List, Dict, Optional
+from fastapi.staticfiles import StaticFiles
+import sqlite3, re, json, io
 import xml.etree.ElementTree as ET
+import threading, time, webbrowser
 
 DB_PATH = "data/app.sqlite"
 
-# ====== Connection Pool ======
-POOL_SIZE = int(os.environ.get("TDB_POOL_SIZE", "4"))
-_pool: Optional[Queue] = None
-
-def _new_con() -> sqlite3.Connection:
+# ---------- DB helpers ----------
+def acquire_con():
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
-    try:
-        con.execute("PRAGMA journal_mode=WAL;")
-    except sqlite3.OperationalError:
-        pass
-    con.execute("PRAGMA synchronous=NORMAL;")
-    con.execute("PRAGMA temp_store=MEMORY;")
     return con
 
-def init_pool():
-    global _pool
-    if _pool is not None:
-        return
-    q: Queue = Queue(maxsize=POOL_SIZE)
-    for _ in range(POOL_SIZE):
-        q.put(_new_con())
-    _pool = q
+def fts_rebuild(cur: sqlite3.Cursor):
+    # Rebuild FTS5 shadow from content
+    cur.execute("INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')")
 
-@contextmanager
-def acquire_con():
-    if _pool is None:
-        init_pool()
-    con = _pool.get()
-    try:
-        yield con
-    finally:
-        _pool.put(con)
+def fts_escape_phrase(s: str) -> str:
+    # 安全なフレーズ検索にする（空白/ハイフン等があっても列名扱いにならない）
+    return f"\"{(s or '').replace('\"','\"\"')}\""
 
-# ====== Normalization / FTS helpers ======
-_Z2H_MAP = {"，":"、","．":"。","･":"・","ｰ":"ー","－":"ー","—":"ー","―":"ー","〜":"～","～":"～"}
-_WS_RE = re.compile(r"\s+", re.MULTILINE)
+def normalize_sources_filter(sources: Optional[List[str]]) -> List[str]:
+    return [s for s in (sources or []) if s is not None and s != ""]
 
-def jnorm(text: Optional[str]) -> str:
-    if not text:
-        return ""
-    s = unicodedata.normalize("NFKC", text)
-    for k, v in _Z2H_MAP.items():
-        s = s.replace(k, v)
-    s = _WS_RE.sub(" ", s).strip()
-    return s
-
-def fts_phrase(term: str) -> str:
-    """FTS5のMATCHに安全に渡すため、常にフレーズ引用。内部の二重引用符は二重化。"""
-    return '"' + term.replace('"', '""') + '"'
-
-def rebuild_fts(con: sqlite3.Connection):
-    cur = con.cursor()
-    cur.execute("DELETE FROM entries_fts;")
-    cur.execute("""
-        INSERT INTO entries_fts(rowid, en_text, ja_text)
-        SELECT id, en_text, ja_text FROM entry_pairs
-    """)
-    con.commit()
-
-# ====== App ======
+# ---------- FastAPI ----------
 app = FastAPI(title="Translation DB Tool API")
 app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
 
 @app.on_event("startup")
-def on_startup():
-    init_pool()
-    # UIを自動で開く（reloader二重防止のためフラグ使用）
-    try:
-        flag = os.path.join(tempfile.gettempdir(), "tdb_ui_opened.flag")
-        if not os.path.exists(flag) and os.environ.get("TDB_AUTO_OPEN", "1") == "1":
-            def _open():
-                time.sleep(0.8)
-                webbrowser.open("http://127.0.0.1:8000/ui/")
-                with open(flag, "w", encoding="utf-8") as f:
-                    f.write("1")
-            threading.Thread(target=_open, daemon=True).start()
-    except Exception:
-        pass
+def _auto_open():
+    # 1回だけ /ui を開く（run.bat から起動時など）
+    def _open():
+        time.sleep(0.7)
+        try:
+            webbrowser.open("http://127.0.0.1:8000/ui")
+        except Exception:
+            pass
+    threading.Thread(target=_open, daemon=True).start()
 
 @app.get("/health")
 def health():
     return {"ok": True}
 
-# ========= sources list =========
+# ---------- /sources ----------
 @app.get("/sources")
 def sources():
     with acquire_con() as con:
         cur = con.cursor()
         cur.execute("""
-            SELECT COALESCE(source_name, '') AS name, COUNT(*) AS cnt
+            SELECT COALESCE(source_name,'') AS name, COUNT(*) AS cnt
             FROM entry_pairs
-            GROUP BY COALESCE(source_name, '')
-            ORDER BY cnt DESC, name ASC
+            GROUP BY COALESCE(source_name,'')
+            ORDER BY cnt DESC, name
         """)
-        rows = cur.fetchall()
-    return {"sources": [{"name": r["name"], "count": r["cnt"]} for r in rows]}
+        return {"sources": [{"name": r["name"], "count": r["cnt"]} for r in cur.fetchall()]}
 
-# ========= /search =========
+# ---------- /search ----------
 @app.get("/search")
-def search(
-    q: str,
-    page: int = 1,
-    size: int = 50,
-    max_len: int = 0,
-    sources: List[str] = Query(default=[]),          # /search?sources=A&sources=B...
-    min_priority: Optional[int] = None
-):
-    qn = jnorm(q)
-    off = (page - 1) * size
-
-    filters = []
-    params: List = [fts_phrase(qn)]
-    if sources:
-        placeholders = ",".join(["?"] * len(sources))
-        filters.append(f"e.source_name IN ({placeholders})")
-        params.extend(sources)
-    if min_priority is not None:
-        filters.append("e.priority >= ?")
-        params.append(min_priority)
-    and_filters = ("AND " + " AND ".join(filters)) if filters else ""
-
-    with acquire_con() as con:
-        cur = con.cursor()
+def search(q: str, page: int = 1, size: int = 50,
+           max_len: int = 240,
+           min_priority: Optional[int] = None,
+           sources: Optional[List[str]] = None):
+    off = max(0, (page - 1) * size)
+    def run_with_fts_query(fts_q: str):
+        where = ["entries_fts MATCH ?"]
+        params: List[object] = [fts_q]
+        if min_priority is not None:
+            where.append("e.priority >= ?")
+            params.append(min_priority)
+        srcs = normalize_sources_filter(sources)
+        if srcs:
+            where.append(f"COALESCE(e.source_name,'') IN ({','.join('?' for _ in srcs)})")
+            params.extend(srcs)
         cur.execute(
             f"""
-            SELECT e.id, e.en_text AS en, e.ja_text AS ja,
-                   e.source_name AS source, e.priority AS priority,
+            SELECT e.id, e.en_text AS en, e.ja_text AS ja, e.source_name AS source, e.priority,
                    bm25(entries_fts) AS score
             FROM entries_fts
             JOIN entry_pairs e ON entries_fts.rowid = e.id
-            WHERE entries_fts MATCH ?
-            {and_filters}
+            WHERE {' AND '.join(where)}
             ORDER BY score ASC
             LIMIT ? OFFSET ?
             """,
             (*params, size, off),
         )
         rows = cur.fetchall()
+        items = []
+        for r in rows:
+            en = r["en"] or ""
+            ja = r["ja"] or ""
+            if max_len and max_len > 0:
+                if len(en) > max_len: en = en[:max_len] + "…"
+                if len(ja) > max_len: ja = ja[:max_len] + "…"
+            items.append({
+                "id": r["id"],
+                "en": en,
+                "ja": ja,
+                "source": r["source"] or "",
+                "priority": r["priority"],
+                "score": float(r["score"]),
+            })
+        return items
 
-    def snippet(text: str, term: str, max_chars: int) -> str:
-        if max_chars <= 0 or not text:
-            return text or ""
-        t = text
-        low = t.lower()
-        ix = low.find(term.lower())
-        if ix < 0:
-            return (t[:max_chars] + "…") if len(t) > max_chars else t
-        pad = max_chars // 2
-        start = max(ix - pad, 0)
-        end = min(ix + len(term) + pad, len(t))
-        s = t[start:end]
-        if start > 0: s = "…" + s
-        if end < len(t): s = s + "…"
-        return s
+    srcs_dbg = normalize_sources_filter(sources)
+    print(f"[SEARCH] q='{q}' size={size} minp={min_priority} sources={srcs_dbg} page={page}")
 
-    items: List[Dict] = []
-    for r in rows:
-        en, ja = r["en"] or "", r["ja"] or ""
-        if max_len and (len(en) > max_len or len(ja) > max_len):
-            en = snippet(en, qn, max_len)
-            ja = snippet(ja, qn, max_len)
-        items.append({
-            "id": r["id"], "en": en, "ja": ja,
-            "source": r["source"], "priority": r["priority"],
-            "score": float(r["score"]), "q": qn,
-        })
-    return {"items": items, "total": None}
+    with acquire_con() as con:
+        cur = con.cursor()
+        # まずはフレーズ検索（"saving throw"）
+        fts_q = fts_escape_phrase(q)
+        items = run_with_fts_query(fts_q)
 
-# ========= /query =========
+        # 0件なら単語検索（saving throw）
+        if not items and " " in q:
+            print("[SEARCH] fallback to terms:", q)
+            items = run_with_fts_query(q)
+
+        print(f"[SEARCH] hits={len(items)}")
+        return {"items": items, "total": len(items)}
+
+
+# ---------- /query ----------
 class QueryIn(BaseModel):
     lines: List[str]
     top_k: int = 3
-    max_len: int = 0
+    max_len: int = 240
     exact: bool = True
     word_boundary: bool = False
-    sources: List[str] = []
     min_priority: Optional[int] = None
+    sources: Optional[List[str]] = None
 
-def _snippet(text: str, term: str, max_chars: int) -> str:
-    if max_chars <= 0 or not text:
-        return text or ""
-    t = text
-    low = t.lower()
-    ix = low.find(term.lower())
-    if ix < 0:
-        return (t[:max_chars] + "…") if len(t) > max_chars else t
-    pad = max_chars // 2
-    start = max(ix - pad, 0)
-    end = min(ix + len(term) + pad, len(t))
-    s = t[start:end]
-    if start > 0: s = "…" + s
-    if end < len(t): s = s + "…"
-    return s
-
-def _add_pair_uniqued(
-    lst: List[Tuple[str, str, Optional[str], Optional[int]]],
-    en: str, ja: str, source: Optional[str], priority: Optional[int],
-    seen: set, top_k: int
-) -> bool:
-    key = ((en or "").lower(), (ja or "").lower())
-    if key in seen:
-        return False
-    seen.add(key)
-    lst.append((en or "", ja or "", source, priority))
-    return len(lst) >= top_k
+_word_re_cache = {}
+def word_boundary_ok(term: str, text: str) -> bool:
+    key = term.lower()
+    reobj = _word_re_cache.get(key)
+    if not reobj:
+        reobj = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+        _word_re_cache[key] = reobj
+    return bool(reobj.search(text or ""))
 
 @app.post("/query")
 def query(body: QueryIn):
+    srcs = normalize_sources_filter(body.sources)
+
+    def add_match(lst, en, ja, src, prio) -> bool:
+        # 重複除外（大文字小文字を無視）
+        key = (en or "").lower(), (ja or "").lower(), (src or "").lower(), str(prio or "")
+        if key in seen: return False
+        # 単語境界厳密チェック（英のみ）
+        if body.word_boundary and en and not word_boundary_ok(term, en):
+            return False
+        lst.append([en or "", ja or "", src or "", prio])
+        seen.add(key)
+        return len(lst) >= body.top_k
+
     out: List[Dict] = []
-    seen_terms = set()
-
-    filters = []
-    params_base: List = []
-    if body.sources:
-        placeholders = ",".join(["?"] * len(body.sources))
-        filters.append(f"source_name IN ({placeholders})")
-        params_base.extend(body.sources)
-    if body.min_priority is not None:
-        filters.append("priority >= ?")
-        params_base.append(body.min_priority)
-    where_tail = (" AND " + " AND ".join(filters)) if filters else ""
-    and_filters = ("AND " + " AND ".join(filters)) if filters else ""
-
-    for raw in body.lines:
-        term = jnorm(raw)
-        if not term or term in seen_terms:
-            continue
-        seen_terms.add(term)
-
-        matches: List[Tuple[str, str, Optional[str], Optional[int]]] = []
-        seen_pairs: set = set()
-
-        re_pat = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE) if body.word_boundary else None
-
-        with acquire_con() as con:
-            cur = con.cursor()
-
-            # 1) 完全一致
-            if body.exact:
-                cur.execute(
-                    f"""
-                    SELECT en_text, ja_text, source_name AS source, priority
-                    FROM entry_pairs
-                    WHERE lower(en_text) = lower(?) {where_tail}
-                    LIMIT ?
-                    """,
-                    [term, *params_base, body.top_k]
-                )
-                for r in cur.fetchall():
-                    en, ja = r["en_text"] or "", r["ja_text"] or ""
-                    if re_pat and not re_pat.search(en):
-                        continue
-                    if _add_pair_uniqued(matches, en, ja, r["source"], r["priority"], seen_pairs, body.top_k):
-                        break
-
-            # 2) FTS 補完（常に安全なフレーズ引用で投げる→ Python側で境界厳密化）
-            remain = body.top_k - len(matches)
-            if remain > 0:
-                cur.execute(
-                    f"""
-                    SELECT e.en_text AS en, e.ja_text AS ja,
-                           e.source_name AS source, e.priority AS priority
-                    FROM entries_fts
-                    JOIN entry_pairs e ON entries_fts.rowid = e.id
-                    WHERE entries_fts MATCH ?
-                    {and_filters}
-                    LIMIT ?
-                    """,
-                    [fts_phrase(term), *params_base, remain * 6]
-                )
-                for r in cur.fetchall():
-                    en, ja = r["en"] or "", r["ja"] or ""
-                    if re_pat and not re_pat.search(en):
-                        continue
-                    if _add_pair_uniqued(matches, en, ja, r["source"], r["priority"], seen_pairs, body.top_k):
-                        break
-
-        if body.max_len and matches:
-            summarized = []
-            for en, ja, src, pr in matches:
-                summarized.append((_snippet(en, term, body.max_len),
-                                   _snippet(ja, term, body.max_len),
-                                   src, pr))
-            matches = summarized
-
-        out.append({
-            "term": term,
-            "candidates": [[en, ja, src, pr] for en, ja, src, pr in matches]
-        })
-
-    return out
-
-# ========= /import/xml =========
-@app.post("/import/xml")
-def import_xml(
-    enfile: UploadFile = File(...),
-    jafile: UploadFile = File(...),
-    src_en: str = Form("Loca EN"),
-    src_ja: str = Form("Loca JP"),
-    priority: int = Form(100)
-):
-    """
-    英/日XMLを取り込み、idで突き合わせて entry_pairs に一括登録 → FTS再構築。
-    XMLは <... id="...">テキスト</...> のように id 属性を持つ要素であればOK。
-    """
-    en_bytes = enfile.file.read()
-    ja_bytes = jafile.file.read()
-
-    def map_from_xml(b: bytes) -> Dict[str, str]:
-        m: Dict[str, str] = {}
-        root = ET.fromstring(b)
-        for el in root.iter():
-            idv = el.attrib.get("id")
-            if not idv:
-                continue
-            txt = "".join(el.itertext()).strip()
-            if txt:
-                m[idv] = txt
-        return m
-
-    en_map = map_from_xml(en_bytes)
-    ja_map = map_from_xml(ja_bytes)
-
-    count_pairs = 0
     with acquire_con() as con:
         cur = con.cursor()
-        src_name = f"XML:{src_en}|{src_ja}"
-        rows = []
-        for k, en_text in en_map.items():
-            ja_text = ja_map.get(k, "")
-            # どちらか片方でもあれば入れる
-            if en_text or ja_text:
-                rows.append((en_text, ja_text, src_name, priority))
-        if rows:
-            cur.executemany(
-                "INSERT INTO entry_pairs(en_text, ja_text, source_name, priority) VALUES (?,?,?,?)",
-                rows
-            )
-            con.commit()
-            rebuild_fts(con)
-            count_pairs = len(rows)
+        for raw in body.lines:
+            term = (raw or "").strip()
+            if not term:
+                out.append({"term": "", "candidates": []})
+                continue
 
-    return {"inserted": count_pairs, "source_name": f"XML:{src_en}|{src_ja}"}
+            matches: List[List[object]] = []
+            seen = set()
 
-# ===== entry read/update =====
-from typing import Optional
+            # 1) 完全一致（優先）
+            if body.exact:
+                where = ["LOWER(en_text) = LOWER(?)"]
+                params: List[object] = [term]
+                if body.min_priority is not None:
+                    where.append("priority >= ?")
+                    params.append(body.min_priority)
+                if srcs:
+                    where.append(f"COALESCE(source_name,'') IN ({','.join('?' for _ in srcs)})")
+                    params.extend(srcs)
 
+                cur.execute(
+                    f"""
+                    SELECT en_text, ja_text, source_name, priority
+                    FROM entry_pairs
+                    WHERE {' AND '.join(where)}
+                    LIMIT ?
+                    """,
+                    (*params, body.top_k),
+                )
+                for r in cur.fetchall():
+                    if add_match(matches, r["en_text"], r["ja_text"], r["source_name"], r["priority"]):
+                        break
+
+            # 2) FTS 補完
+            remain = body.top_k - len(matches)
+            if remain > 0:
+                where = ["entries_fts MATCH ?"]
+                params: List[object] = [fts_escape_phrase(term)]
+                if body.min_priority is not None:
+                    where.append("e.priority >= ?")
+                    params.append(body.min_priority)
+                if srcs:
+                    where.append(f"COALESCE(e.source_name,'') IN ({','.join('?' for _ in srcs)})")
+                    params.extend(srcs)
+
+                cur.execute(
+                    f"""
+                    SELECT e.en_text AS en, e.ja_text AS ja, e.source_name AS src, e.priority AS pr
+                    FROM entries_fts
+                    JOIN entry_pairs e ON entries_fts.rowid = e.id
+                    WHERE {' AND '.join(where)}
+                    LIMIT ?
+                    """,
+                    (*params, remain * 6),
+                )
+                for r in cur.fetchall():
+                    if add_match(matches, r["en"], r["ja"], r["src"], r["pr"]):
+                        break
+
+            # 3) 長文スニペット
+            if body.max_len and body.max_len > 0:
+                cut = body.max_len
+                for i in range(len(matches)):
+                    en, ja, src, pr = matches[i]
+                    if len(en) > cut: en = en[:cut] + "…"
+                    if len(ja) > cut: ja = ja[:cut] + "…"
+                    matches[i] = [en, ja, src, pr]
+
+            out.append({"term": term, "candidates": matches})
+    return out
+
+# ---------- inline edit ----------
 class EntryUpdate(BaseModel):
     en_text: Optional[str] = None
     ja_text: Optional[str] = None
@@ -364,7 +239,6 @@ class EntryUpdate(BaseModel):
     priority: Optional[int] = None
 
 def _update_fts_for_id(cur: sqlite3.Cursor, rowid: int, en: str, ja: str):
-    # FTSの該当rowを差し替え
     cur.execute("DELETE FROM entries_fts WHERE rowid=?", (rowid,))
     cur.execute("INSERT INTO entries_fts(rowid, en_text, ja_text) VALUES (?,?,?)", (rowid, en, ja))
 
@@ -372,72 +246,68 @@ def _update_fts_for_id(cur: sqlite3.Cursor, rowid: int, en: str, ja: str):
 def get_entry(id: int):
     with acquire_con() as con:
         cur = con.cursor()
-        cur.execute("""
-            SELECT id, en_text, ja_text, source_name, priority
-            FROM entry_pairs WHERE id=?
-        """, (id,))
+        cur.execute("SELECT id, en_text, ja_text, source_name, priority FROM entry_pairs WHERE id=?", (id,))
         r = cur.fetchone()
-        if not r:
-            return {"error": "not found"}, 404
+        if not r: return {"error": "not found"}, 404
         return dict(r)
 
 @app.patch("/entry/{id}")
 def patch_entry(id: int, body: EntryUpdate):
-    fields = []
-    params = []
-    if body.en_text is not None:
-        fields.append("en_text=?")
-        params.append(body.en_text)
-    if body.ja_text is not None:
-        fields.append("ja_text=?")
-        params.append(body.ja_text)
-    if body.source_name is not None:
-        fields.append("source_name=?")
-        params.append(body.source_name)
-    if body.priority is not None:
-        fields.append("priority=?")
-        params.append(body.priority)
-    if not fields:
-        return {"updated": 0}
+    fields = []; params: List[object] = []
+    if body.en_text is not None: fields.append("en_text=?"); params.append(body.en_text)
+    if body.ja_text is not None: fields.append("ja_text=?"); params.append(body.ja_text)
+    if body.source_name is not None: fields.append("source_name=?"); params.append(body.source_name)
+    if body.priority is not None: fields.append("priority=?"); params.append(body.priority)
+    if not fields: return {"updated": 0}
 
     with acquire_con() as con:
         cur = con.cursor()
         cur.execute(f"UPDATE entry_pairs SET {', '.join(fields)} WHERE id=?", (*params, id))
-        # 最新値でFTS更新
         cur.execute("SELECT en_text, ja_text FROM entry_pairs WHERE id=?", (id,))
         row = cur.fetchone()
         if row:
             _update_fts_for_id(cur, id, row["en_text"] or "", row["ja_text"] or "")
         con.commit()
-
-        cur.execute("""
-            SELECT id, en_text, ja_text, source_name, priority
-            FROM entry_pairs WHERE id=?
-        """, (id,))
+        cur.execute("SELECT id, en_text, ja_text, source_name, priority FROM entry_pairs WHERE id=?", (id,))
         return dict(cur.fetchone())
 
-class EntryPatchItem(EntryUpdate):
-    id: int
+# ---------- import XML (multipart) ----------
+@app.post("/import/xml")
+async def import_xml(
+    enfile: UploadFile = File(...),
+    jafile: UploadFile = File(...),
+    src_en: str = Form("Loca EN"),
+    src_ja: str = Form("Loca JP"),
+    priority: int = Form(100),
+):
+    en_bytes = await enfile.read()
+    ja_bytes = await jafile.read()
+    en_root = ET.parse(io.BytesIO(en_bytes)).getroot()
+    ja_root = ET.parse(io.BytesIO(ja_bytes)).getroot()
 
-@app.post("/entries/bulk_update")
-def bulk_update(items: List[EntryPatchItem]):
-    if not items:
-        return {"updated": 0}
+    def extract_pairs(root):
+        # BG3 の loca.xml 想定： <content id="SomeId">Text</content> のような形を拾う
+        pairs = {}
+        for node in root.iter():
+            if node.attrib.get("id"):
+                text = (node.text or "").strip()
+                pairs[node.attrib["id"]] = text
+        return pairs
+
+    en_map = extract_pairs(en_root)
+    ja_map = extract_pairs(ja_root)
+
+    inserted = 0
     with acquire_con() as con:
         cur = con.cursor()
-        count = 0
-        for it in items:
-            fields, params = [], []
-            if it.en_text is not None: fields.append("en_text=?"); params.append(it.en_text)
-            if it.ja_text is not None: fields.append("ja_text=?"); params.append(it.ja_text)
-            if it.source_name is not None: fields.append("source_name=?"); params.append(it.source_name)
-            if it.priority is not None: fields.append("priority=?"); params.append(it.priority)
-            if not fields: continue
-            cur.execute(f"UPDATE entry_pairs SET {', '.join(fields)} WHERE id=?", (*params, it.id))
-            cur.execute("SELECT en_text, ja_text FROM entry_pairs WHERE id=?", (it.id,))
-            row = cur.fetchone()
-            if row:
-                _update_fts_for_id(cur, it.id, row["en_text"] or "", row["ja_text"] or "")
-                count += 1
+        for k, en_text in en_map.items():
+            ja_text = ja_map.get(k, "")
+            cur.execute(
+                "INSERT INTO entry_pairs(en_text, ja_text, source_name, priority) VALUES (?,?,?,?)",
+                (en_text, ja_text, f"XML:{src_en}|{src_ja}", priority),
+            )
+            rowid = cur.lastrowid
+            _update_fts_for_id(cur, rowid, en_text or "", ja_text or "")
+            inserted += 1
         con.commit()
-    return {"updated": count}
+    return {"inserted": inserted, "source_name": f"XML:{src_en}|{src_ja}"}
