@@ -1,5 +1,0 @@
-  origin/HEAD -> origin/main
-  origin/feat/query-mode
-  origin/main
-  origin/refactor/db-schema-cleanup
-  origin/scaffold/db-api-skeleton

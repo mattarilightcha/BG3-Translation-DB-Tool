@@ -1,0 +1,30 @@
+﻿# Python / venv
+.venv/
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Local data / artifacts (DBや生成物はリポジトリに含めない)
+data/
+*.sqlite
+*.sqlite3
+*.db
+db/translations.db
+
+# ローカル検証用の大きい元データ（公開不要）
+english.loca.xml
+japanese.loca.xml
+BG*.csv
+
+# IDE
+.vscode/
+.idea/
+
+# dumps / work logs
+branches.txt
+main-full.txt
+diffs-vs-main.txt
+top-level.txt
