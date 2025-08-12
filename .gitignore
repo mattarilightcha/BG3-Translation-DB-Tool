@@ -7,17 +7,21 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Local data / artifacts (DBや生成物はリポジトリに含めない)
-data/
+# Local data / artifacts（原則無視）
+# ※ 下の例外で app.sqlite は追跡する
+data/*
+# SQLite ジャーナルは引き続き無視
+data/*.sqlite-wal
+data/*.sqlite-shm
+# 例外：DB 本体と .gitkeep は追跡
+!data/app.sqlite
+!data/.gitkeep
+
+# ルート直下の SQLite 生成物は無視
 *.sqlite
 *.sqlite3
 *.db
 db/translations.db
-
-# ローカル検証用の大きい元データ（公開不要）
-english.loca.xml
-japanese.loca.xml
-BG*.csv
 
 # IDE
 .vscode/
