@@ -19,23 +19,32 @@ def fts_rebuild(cur: sqlite3.Cursor):
     cur.execute("INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')")
 
 def ensure_schema():
-    """
-    起動時に足りない列やインデックスを自動追加する。
-      - entry_key TEXT
-      - UNIQUE(source_name, entry_key)  (NULLは一意制約の対象外 → CSV等でもOK)
-    """
     with acquire_con() as con:
         cur = con.cursor()
         cur.execute("PRAGMA table_info(entry_pairs)")
         cols = {r["name"].lower() for r in cur.fetchall()}
         if "entry_key" not in cols:
             cur.execute("ALTER TABLE entry_pairs ADD COLUMN entry_key TEXT")
-        # 一意インデックス（なければ作成）
-        cur.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_source_entrykey
-            ON entry_pairs(COALESCE(source_name,''), COALESCE(entry_key,''))
-        """)
+
+        # 旧インデックスを念のため削除
+        cur.execute("PRAGMA index_list(entry_pairs)")
+        idxs = [r["name"] for r in cur.fetchall()]
+        if "uq_source_entrykey" in idxs:
+            cur.execute("DROP INDEX IF EXISTS uq_source_entrykey")
+
+        # 部分ユニーク（entry_key が NOT NULL のものだけ一意）
+        try:
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_source_entrykey
+                ON entry_pairs(source_name, entry_key)
+                WHERE entry_key IS NOT NULL
+            """)
+        except sqlite3.Error as e:
+            # 既存重複で作成失敗した場合でも起動は続行（ログだけ）
+            print("[SCHEMA] unique index create failed:", e)
+
         con.commit()
+
 
 def normalize_sources_filter(sources: Optional[List[str]]) -> List[str]:
     return [s for s in (sources or []) if s is not None and s != ""]
@@ -80,15 +89,16 @@ def sources():
 @app.delete("/sources/{source_name}")
 def delete_source(source_name: str):
     if not source_name:
-        raise HTTPException(400, "source_name is required")
+        raise HTTPException(status_code=400, detail="source_name is required")
     with acquire_con() as con:
         cur = con.cursor()
-        cur.execute("SELECT COUNT(*) AS c FROM entry_pairs WHERE COALESCE(source_name,'') = ?", (source_name,))
+        cur.execute("SELECT COUNT(*) AS c FROM entry_pairs WHERE COALESCE(source_name,'')=?", (source_name,))
         before = cur.fetchone()["c"]
-        cur.execute("DELETE FROM entry_pairs WHERE COALESCE(source_name,'') = ?", (source_name,))
+        cur.execute("DELETE FROM entry_pairs WHERE COALESCE(source_name,'')=?", (source_name,))
         fts_rebuild(cur)
         con.commit()
         return {"deleted": before, "source_name": source_name}
+
 
 # ---------------- /search ----------------
 @app.get("/search")
@@ -341,23 +351,26 @@ def _extract_id_text_pairs(root: ET.Element) -> Tuple[int, Dict[str, str]]:
 
 def _upsert_xml_pair(cur: sqlite3.Cursor, source_name: str, entry_key: str,
                      en_text: str, ja_text: str, priority: int) -> int:
-    """
-    entry_key をキーに UPSERT。既存行があれば上書き、なければINSERT。
-    返り値：その行のid（FTS更新用）
-    """
-    cur.execute("""
-        INSERT INTO entry_pairs (en_text, ja_text, source_name, priority, entry_key)
-        VALUES (?,?,?,?,?)
-        ON CONFLICT(COALESCE(source_name,''), COALESCE(entry_key,'')) DO UPDATE SET
-          en_text=excluded.en_text,
-          ja_text=excluded.ja_text,
-          priority=excluded.priority
-    """, (en_text, ja_text, source_name, priority, entry_key))
-    # 対象行の id を取得
-    cur.execute("SELECT id FROM entry_pairs WHERE COALESCE(source_name,'')=? AND COALESCE(entry_key,'')=?",
-                (source_name, entry_key))
+    # まず存在チェック
+    cur.execute(
+        "SELECT id FROM entry_pairs WHERE source_name=? AND entry_key=?",
+        (source_name, entry_key)
+    )
     row = cur.fetchone()
-    return int(row["id"]) if row else 0
+    if row:
+        rowid = int(row["id"])
+        cur.execute(
+            "UPDATE entry_pairs SET en_text=?, ja_text=?, priority=? WHERE id=?",
+            (en_text, ja_text, priority, rowid)
+        )
+    else:
+        cur.execute(
+            "INSERT INTO entry_pairs (en_text, ja_text, source_name, priority, entry_key) VALUES (?,?,?,?,?)",
+            (en_text, ja_text, source_name, priority, entry_key)
+        )
+        rowid = int(cur.lastrowid)
+    return rowid
+
 
 @app.post("/import/xml")
 async def import_xml(

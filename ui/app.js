@@ -65,29 +65,61 @@ function renderSourcesMenu(list){
   const saved = JSON.parse(localStorage.getItem('tdb-sources')||'[]');
   const namesNow = new Set(list.map(x=>x.name));
   const restored = saved.filter(s=>namesNow.has(s));
-  SELECTED_SOURCES = new Set(restored); // 交差
+  SELECTED_SOURCES = new Set(restored);
+
   const box = $('#srcList'); if(!box) return;
   box.innerHTML = '';
-  for(const s of list){
+
+  for (const s of list){
     const id = 'src_' + btoa(encodeURIComponent(s.name)).replace(/=+$/,'');
     const row = document.createElement('div');
+
     row.innerHTML = `
       <label for="${id}">
         <span title="${escapeHtml(s.name)}">${escapeHtml(s.name||'(empty)')}</span>
         <span class="count">${s.count}</span>
-      </label>`;
+      </label>
+      <div class="right">
+        <button class="btn-icon danger" data-del="${escapeHtml(s.name)}" title="このソースを削除">🗑</button>
+      </div>`;
+
     const input = document.createElement('input');
     input.type='checkbox'; input.id=id; input.value=s.name;
     input.checked = (SELECTED_SOURCES.size===0) ? true : SELECTED_SOURCES.has(s.name);
     input.style.marginRight='8px';
     row.querySelector('label').prepend(input);
+
     box.appendChild(row);
   }
-  // 適用時に保存
+
+  // 削除（イベント委譲）
+  box.onclick = async (e)=>{
+    const btn = e.target.closest('button[data-del]');
+    if(!btn) return;
+    const name = btn.getAttribute('data-del');
+    if(!confirm(`source="${name}" を削除します。よろしいですか？`)) return;
+
+    try{
+      const res = await fetch('/sources/' + encodeURIComponent(name), { method:'DELETE' });
+      const payload = await res.json();
+      console.log('[SOURCES] deleted:', payload);
+      // 再読込
+      const sres = await fetch('/sources'); const sdata = await sres.json();
+      renderSourcesMenu(sdata.sources||[]);
+      updateSourceSummary();
+      $('#srcSummary').textContent = `削除しました: ${name}`;
+    }catch(err){
+      console.error(err);
+      alert('削除に失敗しました（詳細はConsole参照）');
+    }
+  };
+
   const now = getCheckedSourcesNow();
   SELECTED_SOURCES = new Set(now);
   updateSourceSummary();
 }
+
+
 function getCheckedSourcesNow(){
   const inputs = [...document.querySelectorAll('#srcList input[type=checkbox]')];
   const checked = inputs.filter(i=>i.checked).map(i=>i.value);
@@ -365,14 +397,15 @@ function initImportBindings(){
     try{
       const res = await fetch('/import/xml', { method:'POST', body: fd });
 
-      if(!res.ok){
-        let payload = null;
-        try { payload = await res.json(); } catch{ payload = { detail: await res.text() }; }
-        console.error('[IMPORT/XML] HTTP error', res.status, payload);
-
-        // サーバからの詳細（mismatchのサンプル等）をUIにそのまま表示
-        const d = payload?.detail;
-        const msg = typeof d === 'object' ? JSON.stringify(d, null, 2) : String(d || `HTTP ${res.status}`);
+      if (!res.ok) {
+        const text = await res.text(); // ★一度だけ読む
+        let detail = text;
+        try {
+          const j = JSON.parse(text);
+          detail = (j && j.detail !== undefined) ? j.detail : j;
+        } catch {}
+        console.error('[IMPORT/XML] HTTP error', res.status, detail);
+        const msg = (typeof detail === 'string') ? detail : JSON.stringify(detail, null, 2);
         st.textContent = `エラー: ${msg}`;
         st.className = 'status error';
         return;
