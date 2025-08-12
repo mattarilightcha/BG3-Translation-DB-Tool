@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Translation DB Tool</title>
+<link rel="stylesheet" href="app.css">
+
+<body>
+<header class="app-header">
+  <div class="brand">
+    <h1>Translation DB Tool</h1>
+    <small>ローカル辞書照会（CSV / XML → SQLite / FTS5）</small>
+  </div>
+  <div class="actions">
+    <button id="themeBtn" title="テーマ切替">🌓 テーマ</button>
+    <a href="/health" target="_blank" class="ghost">/health</a>
+  </div>
+</header>
+
+<main class="container">
+  <!-- ルート：ソース名フィルタ -->
+  <section class="card" id="root-filters">
+    <div class="form-row">
+      <div class="multisel">
+        <button id="srcBtn" class="ghost">ソース選択</button>
+        <span class="tip" tabindex="0" data-tip="チェックしたソースのみを検索・照会の対象にします。未選択=全ソース。">i</span>
+        <div id="srcMenu" class="menu" hidden>
+          <div class="menu-head">
+            <button id="srcAll">全選択</button>
+            <button id="srcNone">全解除</button>
+            <button id="srcApply" class="primary">適用</button>
+          </div>
+          <div id="srcList" class="menu-list"></div>
+        </div>
+      </div>
+      <small id="srcSummary" class="muted"></small>
+    </div>
+  </section>
+
+  <nav class="tabs" aria-label="モード切替">
+    <button class="tab" id="tab-search"  aria-selected="false">検索（一覧）</button>
+    <button class="tab" id="tab-query"   aria-selected="true">照会（LLM補助）</button>
+    <button class="tab" id="tab-import"  aria-selected="false">インポート</button>
+    <button class="tab" id="tab-prompts" aria-selected="false">プロンプト</button>
+  </nav>
+
+  <!-- 検索 -->
+  <section id="panel-search" class="card" role="tabpanel" aria-labelledby="tab-search" hidden>
+    <div class="form-row">
+      <label class="inline">キーワード
+        <input id="q" type="text" placeholder="saving throw">
+      </label>
+      <label class="inline">size
+        <input id="size" type="number" value="20" min="1" max="200">
+      </label>
+      <label class="inline">min_priority
+        <input id="s_minprio" type="number" placeholder="">
+      </label>
+      <div class="btn-group">
+        <button id="btnSearch" class="primary">検索</button>
+        <button id="copyTable">表をTSVコピー</button>
+      </div>
+      <div class="status" id="searchStatus"></div>
+    </div>
+
+    <div class="table-wrap">
+      <table id="searchTable" class="table" hidden>
+        <thead><tr>
+          <th style="width:80px">ID</th>
+          <th>EN</th>
+          <th>JA</th>
+          <th style="width:140px">source</th>
+          <th style="width:70px">prio</th>
+          <th style="width:90px">score</th>
+          <th style="width:120px">操作</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 照会 -->
+  <section id="panel-query" class="card" role="tabpanel" aria-labelledby="tab-query">
+    <div class="form-row">
+      <label class="inline">Top-K
+        <span class="tip" tabindex="0" data-tip="1語あたり返す候補の件数。">i</span>
+        <input id="topk" type="number" value="3" min="1" max="10">
+      </label>
+      <label class="inline">max_len
+        <span class="tip" tabindex="0" data-tip="長文候補の抜粋最大文字数。0で無制限。">i</span>
+        <input id="maxlen" type="number" value="240" min="0" max="1000">
+      </label>
+      <label class="inline">
+        <input id="exact" type="checkbox" checked>
+        完全一致優先
+        <span class="tip" tabindex="0" data-tip="まず英語の完全一致を探し、足りない分だけ全文検索で補完します。">i</span>
+      </label>
+      <label class="inline">
+        <input id="wb" type="checkbox">
+        単語境界（厳密）
+        <span class="tip" tabindex="0" data-tip="英語だけ対象。FTSヒット後に正規表現 \\b で厳密に単語境界をチェックします。">i</span>
+      </label>
+      <label class="inline">min_priority
+        <span class="tip" tabindex="0" data-tip="この値以上のデータだけに絞ります。小さい値ほど“強い訳”運用を推奨。">i</span>
+        <input id="minprio" type="number" placeholder="">
+      </label>
+
+      <!-- プロンプト選択/挿入 -->
+      <label class="inline">プロンプト
+        <select id="promptSelect"></select>
+        <button id="managePrompts" class="ghost" title="プロンプトを編集">編集</button>
+      </label>
+      <label class="inline"><input id="includePrompt" type="checkbox" checked> コピー/保存に含める</label>
+
+      <div class="btn-group">
+        <button id="btnRun" class="primary">照会する</button>
+        <button id="copyJSONL">JSONLコピー</button>
+        <button id="copyTSV">TSVコピー</button>
+        <button id="dlJSONL">JSONL保存</button>
+        <button id="dlTSV">TSV保存</button>
+        <button id="dlCSV">CSV保存</button>
+      </div>
+      <div class="status" id="queryStatus"></div>
+    </div>
+
+    <label class="hint">改行区切りで語/フレーズを貼る（例：saving throw）</label>
+    <textarea id="terms" class="terms" placeholder="saving throw&#10;ability check&#10;Saber-Toothed Tiger"></textarea>
+
+    <div class="table-wrap">
+      <table id="queryTable" class="table" hidden>
+        <thead>
+          <tr><th style="width:20%">Term</th><th>候補1</th><th>候補2</th><th>候補3</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- インポート（XML） -->
+  <section id="panel-import" class="card" role="tabpanel" aria-labelledby="tab-import" hidden>
+    <div class="form-row">
+      <div class="inline">EN XML
+        <span class="tip" tabindex="0" data-tip="英語の .loca.xml（id属性で行を特定）。EN/JAのidが一致する行を対にして登録します。">i</span>
+        <input type="file" id="xmlEN" accept=".xml">
+      </div>
+      <div class="inline">JA XML
+        <span class="tip" tabindex="0" data-tip="日本語の .loca.xml。EN XML と同じ id を持つ行が対訳として結合されます。">i</span>
+        <input type="file" id="xmlJA" accept=".xml">
+      </div>
+      <div class="inline">src_en
+        <span class="tip" tabindex="0" data-tip="取り込み元の識別ラベル（英側）。後でsourceフィルタや出力に表示されます。">i</span>
+        <input id="srcEN" type="text" value="Loca EN">
+      </div>
+      <div class="inline">src_ja
+        <span class="tip" tabindex="0" data-tip="取り込み元の識別ラベル（日本語側）。ENと合わせて 'XML:EN|JA' の形式で保存。">i</span>
+        <input id="srcJA" type="text" value="Loca JP">
+      </div>
+      <div class="inline">priority
+        <span class="tip" tabindex="0" data-tip="優先度の目安となる整数。数が小さいほど“強い訳”として扱う運用を推奨（UIのフィルタで下限指定可）。">i</span>
+        <input id="prioXML" type="number" value="100">
+      </div>
+
+      <!-- 追加：厳密 & 上書き -->
+      <label class="inline">
+        <input type="checkbox" id="strict" checked>
+        strict（ID集合 完全一致）
+      </label>
+      <label class="inline">
+        <input type="checkbox" id="replace_src" checked>
+        replace_src（同一sourceは上書き）
+      </label>
+
+      <div class="btn-group"><button id="btnXML" class="primary">XMLインポート</button></div>
+      <div class="status" id="importStatus"></div>
+    </div>
+    <small class="hint">取り込み後はFTSを再構築します。完了したらソース一覧も自動更新します。</small>
+  </section>
+
+  <!-- プロンプト管理 -->
+  <section id="panel-prompts" class="card" role="tabpanel" aria-labelledby="tab-prompts" hidden>
+    <div class="prompt-grid">
+      <aside class="prompt-list">
+        <div class="form-row">
+          <button id="newPrompt">＋ 新規テンプレ</button>
+        </div>
+        <ul id="promptsUl"></ul>
+      </aside>
+      <section class="prompt-editor">
+        <div class="form-row">
+          <label class="inline" style="flex:1">名前
+            <input id="pName" type="text" placeholder="例：Gemini翻訳補助（最小）" style="width:100%">
+          </label>
+          <div class="btn-group">
+            <button id="savePrompt" class="primary">保存/更新</button>
+            <button id="deletePrompt">削除</button>
+            <button id="setDefault">既定にする</button>
+          </div>
+        </div>
+        <textarea id="pBody" class="terms" placeholder="ここにプロンプト本文。"></textarea>
+        <small class="hint">保存はローカル（localStorage）。照会タブで選択してコピー/保存に前置できます。</small>
+      </section>
+    </div>
+  </section>
+</main>
+
+<footer class="app-footer">
+  <span>Local DB: <code>data/app.sqlite</code></span>
+  <span>API: <code>/search</code>, <code>/query</code>, <code>/entry/:id</code>, <code>/import/xml</code>, <code>/sources</code></span>
+</footer>
+
+<script defer src="app.js"></script>
+</body>
+</html>
