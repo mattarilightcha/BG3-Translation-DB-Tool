@@ -1,4 +1,4 @@
-# Translation DB Tool (BG3 特化)
+# BG3 Translation DB Tool
 
 ローカルに **英⇄日 対訳DB** を構築し、**全文検索(FTS5)**・**照会(LLM補助)**・**UIからの直接編集**・**XML/CSVインポート** を行うツール。  
 バルダーズゲート3の `.loca.xml` / 用語集 CSV を主対象。
