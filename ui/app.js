@@ -45,7 +45,7 @@ function downloadText(filename, content, mime='text/plain'){
 
 // ===== Tabs =====
 function showTab(id){
-  const ids = ['search','query','import','prompts'];
+  const ids = ['search','query','import','prompts','compare','matcher'];
   for(const x of ids){
     $('#panel-'+x).hidden = (x!==id);
     $('#tab-'+x).setAttribute('aria-selected', String(x===id));
@@ -55,6 +55,8 @@ $('#tab-search').onclick  = ()=>showTab('search');
 $('#tab-query').onclick   = ()=>showTab('query');
 $('#tab-import').onclick  = ()=>showTab('import');
 $('#tab-prompts').onclick = ()=>showTab('prompts');
+$('#tab-compare').onclick = ()=>showTab('compare');
+$('#tab-matcher').onclick = ()=>showTab('matcher');
 showTab('query'); // default
 $('#managePrompts').onclick = ()=>showTab('prompts');
 
@@ -227,14 +229,17 @@ $('#promptSelect').onchange = (e)=> setActivePrompt(e.target.value);
 async function doSearch(){
   try{
     const q = $('#q').value.trim();
-    const size = Math.max(1, Math.min(200, Number($('#size').value)||20));
+    const size = Math.max(1, Math.min(10000, Number($('#size').value)||20));
+    const page = Math.max(1, Number($('#page')?.value)||1);
     const minp = $('#s_minprio').value === '' ? null : Number($('#s_minprio').value);
+    const hideDup = $('#hideDup')?.checked === true;
     if(!q){ $('#searchStatus').textContent = '検索語を入力'; return; }
     $('#searchStatus').textContent = '検索中…';
 
     const url = new URL('/search', location.origin);
     url.searchParams.set('q', q);
     url.searchParams.set('size', String(size));
+    url.searchParams.set('page', String(page));
     url.searchParams.set('max_len', '0'); // 編集前提でフル本文
     if(minp !== null) url.searchParams.set('min_priority', String(minp));
 
@@ -251,8 +256,18 @@ async function doSearch(){
       return;
     }
     const data = await res.json();
-    renderSearchTable(data.items||[], q);
-    $('#searchStatus').textContent = `表示 ${data.items?.length||0}`;
+    let items = data.items||[];
+    if(hideDup){
+      const seen = new Set();
+      const norm = (s)=> String(s||'').toLowerCase();
+      items = items.filter(r=>{
+        const key = norm(r.en)+"\u0000"+norm(r.ja);
+        if(seen.has(key)) return false;
+        seen.add(key); return true;
+      });
+    }
+    renderSearchTable(items, q);
+    $('#searchStatus').textContent = `表示 ${items.length} 件 (page=${page}, size=${size}${hideDup?', 重複除外':''})`;
   }catch(err){
     console.error(err);
     $('#searchStatus').textContent = '検索エラー（Console参照）';
@@ -366,11 +381,23 @@ function initImportBindings(){
   const btn = $('#btnXML'); const st  = $('#importStatus');
   if(!btn) return;
 
+  // ソース名をファイル名から自動生成
+  function autoFillSourceNames(){
+    try{
+      const en = $('#xmlEN').files?.[0]?.name || '';
+      const ja = $('#xmlJA').files?.[0]?.name || '';
+      if(en){ const base=en.replace(/\.xml$/i,''); $('#srcEN').value = `${base}_Loca EN`; }
+      if(ja){ const base=ja.replace(/\.xml$/i,''); $('#srcJA').value = `${base}_Loca JP`; }
+    }catch{}
+  }
+  $('#xmlEN')?.addEventListener('change', autoFillSourceNames);
+  $('#xmlJA')?.addEventListener('change', autoFillSourceNames);
+
   btn.onclick = async ()=>{
     const en = $('#xmlEN').files[0];
     const ja = $('#xmlJA').files[0];
-    const srcEN = $('#srcEN').value || 'Loca EN';
-    const srcJA = $('#srcJA').value || 'Loca JP';
+    const srcEN = $('#srcEN').value || (en?.name||'').replace(/\.xml$/i,'') + ' Loca EN';
+    const srcJA = $('#srcJA').value || (ja?.name||'').replace(/\.xml$/i,'') + ' Loca JP';
     const prio  = $('#prioXML').value || '100';
     const strict = $('#strict').checked;           // 追加：UIから取得
     const replace_src = $('#replace_src').checked; // 追加：UIから取得
@@ -547,3 +574,310 @@ $('#dlCSV').onclick = ()=>{ if(!window._lastQuery) return;
   const txt = buildWithPrompt(toCSV(window._lastQuery), 'csv');
   downloadText('query_export.csv', txt, 'text/csv');
 };
+
+// ===== Compare (XML diff) =====
+function parseLocaXmlInline(xmlText){
+  const result = new Map(); // uid -> { text, version, raw }
+  if(!xmlText || !xmlText.trim()) return result;
+  try{
+    // 高速・寛容な抽出：<content ...contentuid="..." ... version="..."> ... </content>
+    const re = /<content\b[^>]*?contentuid\s*=\s*"([^"]+)"[^>]*?(?:version\s*=\s*"(\d+)")?[^>]*>([\s\S]*?)<\/content>/gi;
+    let m;
+    while((m = re.exec(xmlText))){
+      const uid = m[1];
+      const ver = m[2] ? Number(m[2]) : null;
+      const inner = m[3]||'';
+      // テキスト抽出（簡易）：タグ除去 → 連続空白を1つに
+      const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      result.set(uid, { text, version: ver, raw: m[0] });
+    }
+  }catch(err){ console.warn('[COMPARE] parse error', err); }
+  return result;
+}
+
+function normalizeForCompare(text){
+  if(text == null) return '';
+  return String(text).replace(/\s+/g,' ').trim();
+}
+
+function compareXmlMaps(mapEn, mapJa){
+  const allUids = new Set([...mapEn.keys(), ...mapJa.keys()]);
+  const diffs = [];
+  for(const uid of allUids){
+    const en = mapEn.get(uid) || { text:'', version:null };
+    const ja = mapJa.get(uid) || { text:'', version:null };
+    const enNorm = normalizeForCompare(en.text);
+    const jaNorm = normalizeForCompare(ja.text);
+    const status = (!mapEn.has(uid)) ? 'ENなし'
+                 : (!mapJa.has(uid)) ? 'JAなし'
+                 : (enNorm === jaNorm) ? '一致'
+                 : '本文差異';
+    const same_as_en = (status==='一致') && (enNorm !== '') && (enNorm === jaNorm);
+    diffs.push({ uid, status, en: en.text, ja: ja.text, ver_en: en.version, ver_ja: ja.version, same_as_en });
+  }
+  return diffs;
+}
+
+function renderCompareTable(rows){
+  const wrap = $('#compareResult'); if(!wrap) return;
+  if(!rows.length){ wrap.innerHTML = '<div class="hint">結果なし</div>'; return; }
+  const esc = escapeHtml;
+  const buildRow = (r)=> {
+    const klass = r.status==='一致' ? (r.same_as_en ? 'same' : 'ok') : (r.status.includes('なし') ? 'warn' : 'diff');
+    const verAttr = (v)=> (v===null || v===undefined || v==='') ? '' : ` version="${v}"`;
+    const xmlRaw = `<content contentuid="${r.uid}"${verAttr(r.ver_en)}>${r.en||''}</content>`;
+    const xml = `<code class=\"language-xml\">${escapeHtml(xmlRaw)}</code>`;
+    const notes = [];
+    if(r.ver_en!==undefined) notes.push(`verEN=${escapeHtml(String(r.ver_en??''))}`);
+    if(r.ver_ja!==undefined) notes.push(`verJA=${escapeHtml(String(r.ver_ja??''))}`);
+    const jaPrev = (r.ja||'').slice(0, 120);
+    if(jaPrev) notes.push(`JAプレビュー: ${escapeHtml(jaPrev)}`);
+    const note = notes.join(' / ');
+    return `
+    <tr class="${klass}">
+      <td class="col-code"><pre class="codebox">${xml}</pre></td>
+      <td class="col-status">${escapeHtml(r.status)}</td>
+      <td class="col-notes">${note||'<span class=\"muted\">—</span>'}</td>
+    </tr>`;
+  };
+  wrap.innerHTML = `
+    <table class="table">
+      <thead>
+        <tr>
+          <th>原文</th>
+          <th style="width:120px">状態</th>
+          <th style="width:28%">備考</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(buildRow).join('')}
+      </tbody>
+    </table>`;
+  try{ if(window.Prism){ Prism.highlightAllUnder(wrap); } }catch{}
+}
+
+function initCompareBindings(){
+  const btn = $('#btnCompare'); const st = $('#compareStatus');
+  if(!btn) return;
+  // 全幅切替
+  $('#toggleWide')?.addEventListener('click', ()=>{
+    const isWide = document.body.classList.toggle('wide');
+    localStorage.setItem('tdb-wide', isWide ? '1' : '');
+  });
+  // 復元
+  (function restoreWide(){ try{ if(localStorage.getItem('tdb-wide')) document.body.classList.add('wide'); }catch{} })();
+  function extractXmlWrapper(xmlText){
+    const text = String(xmlText||'');
+    const decl = (text.match(/^\s*<\?xml[\s\S]*?\?>/i)||[])[0] || '';
+    const open = (text.match(/<contentList\b[^>]*>/i)||[])[0] || '';
+    const close = /<\/contentList>/i.test(text) ? '</contentList>' : (open ? '</contentList>' : '');
+    return { decl, openTag: open, closeTag: close };
+  }
+  btn.onclick = ()=>{
+    const enText = $('#cmpEN').value || '';
+    const jaText = $('#cmpJA').value || '';
+    const mode = $('#cmpMode')?.value || 'align';
+    st.textContent = '解析・比較中…'; st.className = 'status';
+    setTimeout(()=>{
+      const mapEn = parseLocaXmlInline(enText);
+      const mapJa = parseLocaXmlInline(jaText);
+      let diffs = compareXmlMaps(mapEn, mapJa);
+      if(mode==='align'){
+        // EN順（英語のUID順）で表示。JA欠落はwarnで可視化
+        diffs = diffs.filter(d=> mapEn.has(d.uid));
+        const enUids = [...mapEn.keys()];
+        const map = new Map(diffs.map(d=>[d.uid,d]));
+        diffs = enUids.map(uid=> map.get(uid) || { uid, status:'JAなし', en: mapEn.get(uid)?.text||'', ja:'', ver_en: mapEn.get(uid)?.version??'', ver_ja:'' });
+      }else{
+        // まとめ表示：差異→片側なし→一致 の順
+        const order = { '本文差異':0, 'ENなし':1, 'JAなし':2, '一致':3 };
+        diffs.sort((a,b)=> (order[a.status]-order[b.status]) || (a.uid<b.uid?-1:a.uid>b.uid?1:0));
+      }
+      renderCompareTable(diffs);
+      const counts = {
+        total: diffs.length,
+        eq: diffs.filter(d=>d.status==='一致').length,
+        enMiss: diffs.filter(d=>d.status==='ENなし').length,
+        jaMiss: diffs.filter(d=>d.status==='JAなし').length,
+        diff: diffs.filter(d=>d.status==='本文差異').length,
+      };
+      st.textContent = `総数 ${counts.total} / 一致 ${counts.eq} / 差異 ${counts.diff} / ENなし ${counts.enMiss} / JAなし ${counts.jaMiss}`;
+    }, 10);
+  };
+  $('#btnFormatJA')?.addEventListener('click', ()=>{
+    const enText = $('#cmpEN').value || '';
+    const jaText = $('#cmpJA').value || '';
+    const mapEn = parseLocaXmlInline(enText);
+    const mapJa = parseLocaXmlInline(jaText);
+    const enUids = [...mapEn.keys()];
+    const piece = (uid)=>{
+      const it = mapJa.get(uid);
+      if(!it) return `<!-- missing: ${uid} -->`;
+      if(it.raw) return it.raw.trim();
+      const ver = it.version==null? '' : ` version="${it.version}"`;
+      const body = escapeHtml(it.text||'');
+      return `<content contentuid="${uid}"${ver}>${body}</content>`;
+    };
+    const formatted = enUids.map(piece).join('\n');
+    const wrap = extractXmlWrapper(enText);
+    const wrapped = `${wrap.decl?wrap.decl+'\n':''}${wrap.openTag||'<contentList>'}\n${formatted}\n${wrap.closeTag}`;
+    $('#cmpJA').value = wrapped;
+    st.textContent = `JAをEN順（${enUids.length}件）に整形しました。`;
+    updateHighlight();
+  });
+  $('#btnPrettyJA')?.addEventListener('click', ()=>{
+    const jaText = $('#cmpJA').value || '';
+    const mapJa = parseLocaXmlInline(jaText);
+    // 出現順を維持
+    const order = [];
+    const re = /<content\b[^>]*?contentuid\s*=\s*"([^"]+)"[^>]*>([\s\S]*?)<\/content>/gi;
+    let m; while((m = re.exec(jaText))){ order.push(m[1]); }
+    const piece = (uid)=>{
+      const it = mapJa.get(uid);
+      if(!it) return `<!-- missing: ${uid} -->`;
+      return (it.raw||'').trim();
+    };
+    const formatted = order.map(piece).join('\n');
+    $('#cmpJA').value = formatted;
+    st.textContent = `JAを整形しました（順序維持、${order.length}件）。`;
+  });
+  $('#btnFillJAFromEN')?.addEventListener('click', ()=>{
+    const enText = $('#cmpEN').value || '';
+    const jaText = $('#cmpJA').value || '';
+    const mapEn = parseLocaXmlInline(enText);
+    const mapJa = parseLocaXmlInline(jaText);
+    const enUids = [...mapEn.keys()];
+    const piece = (uid)=>{
+      const it = mapJa.get(uid);
+      if(it && it.raw) return it.raw.trim();
+      const en = mapEn.get(uid);
+      if(!en) return `<!-- missing: ${uid} -->`;
+      if(en.raw) return String(en.raw||'').trim();
+      const ver = (en.version===null || en.version===undefined || en.version==='') ? '' : ` version="${en.version}"`;
+      const body = escapeHtml(en.text||'');
+      return `<content contentuid="${uid}"${ver}>${body}</content>`;
+    };
+    const filled = enUids.map(piece).join('\n');
+    const wrapInfo = extractXmlWrapper(enText);
+    const wrapped = `${wrapInfo.decl?wrapInfo.decl+'\n':''}${wrapInfo.openTag||'<contentList>'}\n${filled}\n${wrapInfo.closeTag}`;
+    $('#cmpJA').value = wrapped;
+    $('#compareStatus').textContent = `JA欠落をENで補完しました（${enUids.length}件）。`;
+    // 再描画して補完行をハイライト
+    setTimeout(()=>{
+      const diffs = compareXmlMaps(parseLocaXmlInline($('#cmpEN').value||''), parseLocaXmlInline($('#cmpJA').value||''));
+      renderCompareTable(diffs);
+      const tbody = document.querySelector('#compareResult tbody');
+      if(tbody){
+        [...tbody.rows].forEach(row=>{
+          const text = row.querySelector('.codebox')?.textContent||'';
+          if(text){ row.classList.add('filled-from-en'); }
+        });
+      }
+    }, 0);
+  });
+  $('#btnClearCompare')?.addEventListener('click', ()=>{ $('#cmpEN').value=''; $('#cmpJA').value=''; $('#compareResult').innerHTML=''; st.textContent=''; });
+  $('#btnCopyNoJA')?.addEventListener('click', ()=>{
+    try{
+      const tbody = document.querySelector('#compareResult tbody'); if(!tbody) return;
+      const rows = [...tbody.rows];
+      const texts = rows.filter(r=>/JAなし/.test(r.querySelector('.col-status')?.textContent||''))
+        .map(r=> (r.querySelector('.codebox')?.innerText||'').replace(/\n+/g,'\n').trim())
+        .filter(Boolean);
+      if(!texts.length){ alert('JAなしの行はありません'); return; }
+      const out = texts.join('\n');
+      navigator.clipboard.writeText(out);
+    }catch(e){ alert('コピーに失敗しました: '+e.message); }
+  });
+}
+initCompareBindings();
+
+// ===== Matcher (BG3 MOD↔公式) =====
+let MATCH_LAST = { matched_xml:null, unmatched_xml:null, review_csv:null, counts:null };
+async function matcherRun(){
+  const st = $('#m_status'); st.textContent='送信中…'; st.className='status';
+  try{
+    const mod = $('#m_modXML').files[0];
+    const enDir = ($('#m_enDir').value||'').trim();
+    const jaDir = ($('#m_jaDir').value||'').trim();
+    const baseDir = ($('#m_baseDir').value||'').trim();
+    const fuzzy = $('#m_fuzzy').checked;
+    const cutoff = Number($('#m_cutoff').value||0.92);
+    const workers = Number($('#m_workers').value||1);
+    if(!mod){ st.textContent='MOD XML を選択してください'; st.className='status error'; return; }
+    if(!enDir || !jaDir){ st.textContent='EN/JA ディレクトリを入力してください'; st.className='status error'; return; }
+    const fd = new FormData();
+    fd.append('modfile', mod);
+    fd.append('en_dir', enDir);
+    fd.append('ja_dir', jaDir);
+    if(baseDir) fd.append('base_dir', baseDir);
+    localStorage.setItem('tdb-m-en_dir', enDir);
+    localStorage.setItem('tdb-m-ja_dir', jaDir);
+    localStorage.setItem('tdb-m-base_dir', baseDir);
+    fd.append('enable_fuzzy', String(fuzzy));
+    fd.append('cutoff', String(cutoff));
+    fd.append('workers', String(workers));
+    const res = await fetch('/match/bg3', { method:'POST', body: fd });
+    if(!res.ok){ const text = await res.text(); st.textContent=`エラー: HTTP ${res.status} ${text}`; st.className='status error'; return; }
+    const data = await res.json();
+    MATCH_LAST.matched_xml = data.matched_xml || null;
+    MATCH_LAST.matched_ja_xml = data.matched_ja_xml || null;
+    MATCH_LAST.unmatched_xml = data.unmatched_xml || null;
+    MATCH_LAST.review_csv = data.review_csv || null;
+    MATCH_LAST.counts = data.counts || null;
+    const c = MATCH_LAST.counts||{};
+    $('#m_resultInfo').textContent = `完了: JAあり=${c.matched_ja||0} / JAなし=${c.matched_noja||0} / EN未一致=${c.unmatched||0}  (mod=${c.mod||0}, EN=${enDir}, JA=${jaDir})`;
+    st.textContent='完了'; st.className='status ok';
+  }catch(err){ console.error(err); st.textContent='エラー: '+err.message; st.className='status error'; }
+}
+function matcherClear(){ $('#m_modXML').value=''; $('#m_enDir').value=''; $('#m_jaDir').value=''; $('#m_status').textContent=''; $('#m_resultInfo').textContent=''; MATCH_LAST={matched_xml:null,unmatched_xml:null,review_csv:null,counts:null}; }
+function downloadText(filename, content, mime='text/plain'){
+  const blob = new Blob([content], {type: mime + ';charset=utf-8'});
+  const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+function initMatcherBindings(){
+  $('#m_btnRun')?.addEventListener('click', matcherRun);
+  $('#m_btnClear')?.addEventListener('click', matcherClear);
+  $('#m_dlMatched')?.addEventListener('click', ()=>{ if(!MATCH_LAST.matched_xml){ alert('未生成です'); return; } downloadText('bg3_out_matched_ja.xml', MATCH_LAST.matched_xml, 'application/xml'); });
+  $('#m_dlUnmatched')?.addEventListener('click', ()=>{ if(!MATCH_LAST.unmatched_xml){ alert('未生成です'); return; } downloadText('bg3_out_unmatched_src.xml', MATCH_LAST.unmatched_xml, 'application/xml'); });
+  $('#m_dlReview')?.addEventListener('click', ()=>{ if(!MATCH_LAST.review_csv){ alert('fuzzy無効では出力されません'); return; } downloadText('bg3_review_pairs.csv', MATCH_LAST.review_csv, 'text/csv'); });
+  $('#m_toCompare')?.addEventListener('click', ()=>{
+    try{
+      const srcLeft = $('#m_modXML')?.files?.[0];
+      // 左：MOD原文（アップロードしたXMLを読み込む）
+      if(srcLeft){
+        const fr = new FileReader();
+        fr.onload = ()=>{ $('#cmpEN').value = String(fr.result||''); };
+        fr.readAsText(srcLeft, 'utf-8');
+      } else if (MATCH_LAST.unmatched_xml){
+        // 代替：EN側に unmatched を置く
+        $('#cmpEN').value = MATCH_LAST.unmatched_xml;
+      }
+      // 右：JAありだけ（matched_ja_xml）。無ければ matched 全体
+      const right = MATCH_LAST.matched_ja_xml || MATCH_LAST.matched_xml || '';
+      $('#cmpJA').value = right;
+      showTab('compare');
+      // 即比較を実行
+      $('#btnCompare')?.click();
+    }catch(e){ alert('移行エラー: '+e.message); }
+  });
+  // フォルダ参照（ローカルピッカー）
+  async function pickDir(kind){
+    try{
+      const res = await fetch('/pick/dir?title=' + encodeURIComponent(kind==='en'?'ENフォルダを選択':'JAフォルダを選択'));
+      if(!res.ok){ const t = await res.text(); alert('参照不可: '+t); return; }
+      const data = await res.json();
+      const p = data.path||''; if(!p) return;
+      if(kind==='en'){ $('#m_enDir').value = p; localStorage.setItem('tdb-m-en_dir', p); }
+      else { $('#m_jaDir').value = p; localStorage.setItem('tdb-m-ja_dir', p); }
+    }catch(e){ alert('参照エラー: '+e.message); }
+  }
+  $('#m_pickEN')?.addEventListener('click', ()=>pickDir('en'));
+  $('#m_pickJA')?.addEventListener('click', ()=>pickDir('ja'));
+
+  // 復元（サーバパス）
+  (function restoreMatcherPrefs(){ try{ const en=localStorage.getItem('tdb-m-en_dir')||''; const ja=localStorage.getItem('tdb-m-ja_dir')||''; const base=localStorage.getItem('tdb-m-base_dir')||''; if(en) $('#m_enDir').value=en; if(ja) $('#m_jaDir').value=ja; if(base) $('#m_baseDir').value=base; }catch{} })();
+  // 既定パス（未入力時）
+  if(!$('#m_enDir').value){ $('#m_enDir').placeholder = $('#m_enDir').placeholder || 'data\\bundles\\bg3_official\\English'; $('#m_enDir').value = 'data\\bundles\\bg3_official\\English'; }
+  if(!$('#m_jaDir').value){ $('#m_jaDir').placeholder = $('#m_jaDir').placeholder || 'data\\bundles\\bg3_official\\Japanese'; $('#m_jaDir').value = 'data\\bundles\\bg3_official\\Japanese'; }
+}
+initMatcherBindings();

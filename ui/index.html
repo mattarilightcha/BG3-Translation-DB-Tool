@@ -4,6 +4,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Translation DB Tool</title>
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.min.css">
+<!-- CodeMirror removed -->
 
 <body>
 <header class="app-header">
@@ -13,6 +15,7 @@
   </div>
   <div class="actions">
     <button id="themeBtn" title="テーマ切替">🌓 テーマ</button>
+    <button id="toggleWide" class="ghost has-tip tip-bottom" data-tip="ページ全体の横幅を広げます。もう一度押すと元に戻ります。テーブルや長文を広い表示で確認したい時に使います。">全幅</button>
     <a href="/health" target="_blank" class="ghost">/health</a>
   </div>
 </header>
@@ -22,8 +25,7 @@
   <section class="card" id="root-filters">
     <div class="form-row">
       <div class="multisel">
-        <button id="srcBtn" class="ghost">ソース選択</button>
-        <span class="tip" tabindex="0" data-tip="チェックしたソースのみを検索・照会の対象にします。未選択=全ソース。">i</span>
+        <button id="srcBtn" class="ghost has-tip" data-tip="検索と照会の対象にするソース名を選びます。何も選ばない場合は全ソースが対象です。">ソース選択</button>
         <div id="srcMenu" class="menu" hidden>
           <div class="menu-head">
             <button id="srcAll">全選択</button>
@@ -42,23 +44,34 @@
     <button class="tab" id="tab-query"   aria-selected="true">照会（LLM補助）</button>
     <button class="tab" id="tab-import"  aria-selected="false">インポート</button>
     <button class="tab" id="tab-prompts" aria-selected="false">プロンプト</button>
+    <button class="tab" id="tab-compare" aria-selected="false">比較（XML差分）</button>
+    <button class="tab" id="tab-matcher" aria-selected="false">BG3 翻訳照合（MODと公式の突き合わせ）</button>
   </nav>
 
   <!-- 検索 -->
   <section id="panel-search" class="card" role="tabpanel" aria-labelledby="tab-search" hidden>
+    <p class="page-desc">全文検索を行い、結果を一覧で直接編集・保存できます。ソース選択と優先度下限で強い訳を絞り込み、表はTSVコピー可能です。</p>
+    <!-- 概要tipはボタンツールチップへ統合 -->
     <div class="form-row">
       <label class="inline">キーワード
         <input id="q" type="text" placeholder="saving throw">
       </label>
       <label class="inline">size
-        <input id="size" type="number" value="20" min="1" max="200">
+        <input id="size" type="number" value="20" min="1" max="10000">
+      </label>
+      <label class="inline">page
+        <input id="page" type="number" value="1" min="1">
       </label>
       <label class="inline">min_priority
         <input id="s_minprio" type="number" placeholder="">
       </label>
+      <label class="inline">
+        <input id="hideDup" type="checkbox">
+        重複を非表示
+      </label>
       <div class="btn-group">
-        <button id="btnSearch" class="primary">検索</button>
-        <button id="copyTable">表をTSVコピー</button>
+        <button id="btnSearch" class="primary has-tip" data-tip="全文検索を実行します。入力中のキーワードでEN/JA列を検索し、size/page・優先度下限・ソース選択を反映して結果を表示します。">検索</button>
+        <button id="copyTable" class="has-tip" data-tip="検索結果テーブルをTSV形式でクリップボードにコピーします。表計算や他ツールに貼り付けて利用できます。">表をTSVコピー</button>
       </div>
       <div class="status" id="searchStatus"></div>
     </div>
@@ -81,28 +94,25 @@
 
   <!-- 照会 -->
   <section id="panel-query" class="card" role="tabpanel" aria-labelledby="tab-query">
+    <p class="page-desc">語やフレーズごとに上位候補を抽出します。完全一致や単語境界、ソース/優先度条件を反映し、結果はJSONL/TSV/CSVで保存できます。</p>
+    <!-- 概要tipはボタンツールチップへ統合 -->
     <div class="form-row">
       <label class="inline">Top-K
-        <span class="tip" tabindex="0" data-tip="1語あたり返す候補の件数。">i</span>
-        <input id="topk" type="number" value="3" min="1" max="10">
+        <input id="topk" type="number" value="3" min="1" max="10" class="has-tip" data-tip="語ごとに返す候補の件数。多すぎるとノイズが増えるため3〜5件を推奨。">
       </label>
       <label class="inline">max_len
-        <span class="tip" tabindex="0" data-tip="長文候補の抜粋最大文字数。0で無制限。">i</span>
-        <input id="maxlen" type="number" value="240" min="0" max="1000">
+        <input id="maxlen" type="number" value="240" min="0" max="1000" class="has-tip" data-tip="候補文が長すぎる場合に前後を省略する最大文字数。0で無制限。">
       </label>
-      <label class="inline">
+      <label class="inline has-tip" data-tip="英語の完全一致を最優先で採用し、不足分だけ全文検索で補います。誤マッチを抑えて確度を上げたい場合に有効。">
         <input id="exact" type="checkbox" checked>
         完全一致優先
-        <span class="tip" tabindex="0" data-tip="まず英語の完全一致を探し、足りない分だけ全文検索で補完します。">i</span>
       </label>
-      <label class="inline">
+      <label class="inline has-tip" data-tip="英語のみ対象。全文検索でヒットした語の周辺を正規表現の単語境界(\\b)で再確認し、偶然の部分一致を除外します。">
         <input id="wb" type="checkbox">
         単語境界（厳密）
-        <span class="tip" tabindex="0" data-tip="英語だけ対象。FTSヒット後に正規表現 \\b で厳密に単語境界をチェックします。">i</span>
       </label>
       <label class="inline">min_priority
-        <span class="tip" tabindex="0" data-tip="この値以上のデータだけに絞ります。小さい値ほど“強い訳”運用を推奨。">i</span>
-        <input id="minprio" type="number" placeholder="">
+        <input id="minprio" type="number" placeholder="" class="has-tip" data-tip="この値以上のデータのみを候補に含めます。数が小さいほど“強い訳”として扱う想定です。">
       </label>
 
       <!-- プロンプト選択/挿入 -->
@@ -113,12 +123,12 @@
       <label class="inline"><input id="includePrompt" type="checkbox" checked> コピー/保存に含める</label>
 
       <div class="btn-group">
-        <button id="btnRun" class="primary">照会する</button>
-        <button id="copyJSONL">JSONLコピー</button>
-        <button id="copyTSV">TSVコピー</button>
-        <button id="dlJSONL">JSONL保存</button>
-        <button id="dlTSV">TSV保存</button>
-        <button id="dlCSV">CSV保存</button>
+        <button id="btnRun" class="primary has-tip" data-tip="照会を実行し、語ごとに上位候補（EN/JA/SRC/PRIO）を抽出します。完全一致優先や単語境界、優先度やソース指定が反映されます。">照会する</button>
+        <button id="copyJSONL" class="has-tip" data-tip="照会結果をJSONL形式でクリップボードにコピーします。必要に応じて先頭に選択中のプロンプト文を前置できます。">JSONLコピー</button>
+        <button id="copyTSV" class="has-tip" data-tip="照会結果をTSV形式でコピーします。カラムは term/EN1/JA1/SRC1/PRIO1 ... の配列です。">TSVコピー</button>
+        <button id="dlJSONL" class="has-tip" data-tip="照会結果をJSONLとしてファイル保存します。">JSONL保存</button>
+        <button id="dlTSV" class="has-tip" data-tip="照会結果をTSVとしてファイル保存します。">TSV保存</button>
+        <button id="dlCSV" class="has-tip" data-tip="照会結果をCSVとしてファイル保存します。Excel等での確認に便利です。">CSV保存</button>
       </div>
       <div class="status" id="queryStatus"></div>
     </div>
@@ -138,6 +148,8 @@
 
   <!-- インポート（XML） -->
   <section id="panel-import" class="card" role="tabpanel" aria-labelledby="tab-import" hidden>
+    <p class="page-desc">BG3の言語ファイル（.loca.xml）を英語・日本語のペアで取り込み、同じID同士を対訳として登録します。取り込み後は全文検索に使えるよう自動で索引を作り直します。注意: 大きなファイルでは時間がかかります。エラーが出た場合はファイルのエンコード（UTF-8）と構造を確認してください。strictをオンにすると、英語と日本語のIDの集合が完全に一致しているかを確認し、足りない/余分なIDがある場合は警告します。replace_srcをオンにすると、同じsource名の既存データを一旦消してから入れ直します（上書き更新に便利ですが、元に戻せないため注意）。source名は後からフィルタや出力に使う見出しです。優先度（priority）は小さいほど「強い訳」として扱う想定で、検索や照会で絞り込めます。</p>
+    <!-- 概要tipはボタンツールチップへ統合 -->
     <div class="form-row">
       <div class="inline">EN XML
         <span class="tip" tabindex="0" data-tip="英語の .loca.xml（id属性で行を特定）。EN/JAのidが一致する行を対にして登録します。">i</span>
@@ -147,13 +159,11 @@
         <span class="tip" tabindex="0" data-tip="日本語の .loca.xml。EN XML と同じ id を持つ行が対訳として結合されます。">i</span>
         <input type="file" id="xmlJA" accept=".xml">
       </div>
-      <div class="inline">src_en
-        <span class="tip" tabindex="0" data-tip="取り込み元の識別ラベル（英側）。後でsourceフィルタや出力に表示されます。">i</span>
-        <input id="srcEN" type="text" value="Loca EN">
+      <div class="inline">ソース名（EN）
+        <input id="srcEN" type="text" placeholder="例 english_Loca EN">
       </div>
-      <div class="inline">src_ja
-        <span class="tip" tabindex="0" data-tip="取り込み元の識別ラベル（日本語側）。ENと合わせて 'XML:EN|JA' の形式で保存。">i</span>
-        <input id="srcJA" type="text" value="Loca JP">
+      <div class="inline">ソース名（JA）
+        <input id="srcJA" type="text" placeholder="例 japanese_Loca JP">
       </div>
       <div class="inline">priority
         <span class="tip" tabindex="0" data-tip="優先度の目安となる整数。数が小さいほど“強い訳”として扱う運用を推奨（UIのフィルタで下限指定可）。">i</span>
@@ -170,7 +180,7 @@
         replace_src（同一sourceは上書き）
       </label>
 
-      <div class="btn-group"><button id="btnXML" class="primary">XMLインポート</button></div>
+      <div class="btn-group"><button id="btnXML" class="primary has-tip" data-tip="選択した EN/JA の .loca.xml を読み込み、id一致の行を対訳として登録します。replace_src がONなら同名sourceを上書き、strict がONならID集合の不一致を検出して安全に運用します。">XMLインポート</button></div>
       <div class="status" id="importStatus"></div>
     </div>
     <small class="hint">取り込み後はFTSを再構築します。完了したらソース一覧も自動更新します。</small>
@@ -178,6 +188,8 @@
 
   <!-- プロンプト管理 -->
   <section id="panel-prompts" class="card" role="tabpanel" aria-labelledby="tab-prompts" hidden>
+    <p class="page-desc">照会結果の前置文をテンプレとして保存・切替します。既定テンプレを設定すれば常に先頭へ自動付与できます。</p>
+    <!-- 概要tipはボタンツールチップへ統合 -->
     <div class="prompt-grid">
       <aside class="prompt-list">
         <div class="form-row">
@@ -201,6 +213,91 @@
       </section>
     </div>
   </section>
+
+  <!-- 比較（XML差分） -->
+  <section id="panel-compare" class="card" role="tabpanel" aria-labelledby="tab-compare" hidden>
+    <p class="page-desc">EN/JAのXMLからcontentuid単位で本文を抽出し、UIDごとに一致・差異・片側欠落を分類して表示します。整形・補完ボタンも用意しています。</p>
+    <!-- 全幅切替はヘッダーへ移動 -->
+    <div class="form-row">
+      <label class="inline">表示モード
+        <select id="cmpMode">
+          <option value="align" selected>行マッチ（EN順）</option>
+          <option value="grouped">最後にまとめる（差異グループ）</option>
+        </select>
+      </label>
+      <span class="hint">左：英語XML、右：日本語XML を貼り付け。空白は自動で詰めて比較／JA欠落は黄色で強調。</span>
+    </div>
+    <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
+      <label class="inline" style="flex:1">XML（英語）
+        <textarea id="cmpEN" class="terms" placeholder="&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;&#10;&lt;contentList&gt;&#10;	&lt;content contentuid=&quot;h000006d4gcefbg4092gbb39gfeb27a3bb0a7&quot; version=&quot;1&quot;&gt;Sorry, darling, I haven't got time for underlings.&lt;/content&gt;&#10;	&lt;content contentuid=&quot;h000011feg0be5g4f09g978eg030b3e2e62c6&quot; version=&quot;1&quot;&gt;Replace Spell&lt;/content&gt;&#10;&lt;/contentList&gt;"></textarea>
+      </label>
+      <label class="inline" style="flex:1">XML（日本語）
+        <textarea id="cmpJA" class="terms" placeholder="&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;&#10;&lt;contentList&gt;&#10;	&lt;content contentuid=&quot;h000006d4gcefbg4092gbb39gfeb27a3bb0a7&quot; version=&quot;1&quot;&gt;すまないが、下っ端に構っている暇はないんだ&lt;/content&gt;&#10;	&lt;content contentuid=&quot;h000011feg0be5g4f09g978eg030b3e2e62c6&quot; version=&quot;1&quot;&gt;呪文入れ替え&lt;/content&gt;&#10;&lt;/contentList&gt;"></textarea>
+      </label>
+    </div>
+    <div class="form-row">
+      <div class="btn-group">
+        <button id="btnCompare" class="primary has-tip" data-tip="左の英語XMLと右の日本語XMLを解析し、contentuid単位で一致・差異・片側欠落を分類して一覧化します。EN順では英語UIDの順序で並べ替え、まとめ表示では差異→片側欠落→一致の順で俯瞰できます。">比較する</button>
+        <button id="btnFormatJA" class="has-tip" data-tip="右の日本語XMLを、左の英語XMLのUID順に再配置します。存在しないUIDはコメントで示し、version属性がある場合は保持します。原文順に整えてレビューや差分検出を行いやすくします。">JAをEN順に整形</button>
+        <button id="btnPrettyJA" class="has-tip" data-tip="右の日本語XMLの出現順を維持したまま整形し、余分な空白を整理します。元の順序を崩さずに可読性だけを高めたい場合に使用します。">JA整形（順序維持）</button>
+        <button id="btnFillJAFromEN" class="has-tip" data-tip="英語側に存在し日本語側に欠落しているUIDについて、英語の<content>要素を転写して空所を補完します。後で手動で訳文を入れやすくするための下準備です。">JA欠落をENで補完</button>
+        <button id="btnClearCompare" class="has-tip" data-tip="左右のテキスト欄と比較結果をすべてクリアします。作業をやり直したいときに使用します。">クリア</button>
+        <button id="btnCopyNoJA" class="has-tip" data-tip="一覧から『JAなし』の行だけを抽出し、クリップボードへコピーします。レビューの優先付けに便利です。">JAなしをコピー</button>
+      </div>
+      <div class="status" id="compareStatus"></div>
+    </div>
+    <div id="compareResult" class="table-wrap"></div>
+  </section>
+
+  <!-- BG3照合（MOD↔公式） -->
+  <section id="panel-matcher" class="card" role="tabpanel" aria-labelledby="tab-matcher" hidden>
+    <p class="page-desc">MODのXMLと公式EN/JAフォルダ群を突き合わせ、公式訳の取得・JA欠落・未一致を分類します。相対パスは base_dir＋相対指定で参照可能です。</p>
+    <!-- 概要tipはボタンツールチップへ統合 -->
+    <div class="form-row">
+      <div class="inline">MOD XML
+        <input type="file" id="m_modXML" accept=".xml" class="has-tip" data-tip="MODで配布された .xml ファイルを選びます。比較や照合の元になるファイルです。">
+      </div>
+      <div class="inline">ENディレクトリ
+        <input type="text" id="m_enDir" placeholder="例 D:\BG3\Localization\English" class="has-tip" data-tip="英語の公式ファイルが入っているフォルダ。base_dir を使う場合は、ここは 'English' など相対パスでもOK。">
+        <button id="m_pickEN" class="ghost has-tip" data-tip="フォルダ選択ダイアログで英語フォルダを選びます。">参照</button>
+      </div>
+      <div class="inline">JAディレクトリ
+        <input type="text" id="m_jaDir" placeholder="例 D:\BG3\Localization\Japanese" class="has-tip" data-tip="日本語の公式ファイルが入っているフォルダ。base_dir を使う場合は、ここは 'Japanese' など相対パスでもOK。">
+        <button id="m_pickJA" class="ghost has-tip" data-tip="フォルダ選択ダイアログで日本語フォルダを選びます。">参照</button>
+      </div>
+      <div class="inline">基準フォルダ（任意）
+        <input type="text" id="m_baseDir" placeholder="空欄でOK（既定: data\\bundles\\bg3_official）" class="has-tip" data-tip="空欄のままで大丈夫です。何も入れない場合は既定の data\\bundles\\bg3_official を基準に、EN=English、JA=Japanese を相対指定するのが簡単です。絶対パスで指定したい場合は、この欄は空のまま、EN/JAにフルパスを書いてください。">
+      </div>
+      <label class="inline">fuzzy
+        <span class="tip" tabindex="0" data-tip="あいまい一致を使って近い文章も候補に含めます。ONにすると多少の違いがあっても見つけやすくなりますが、誤判定も増えることがあります。">i</span>
+        <input type="checkbox" id="m_fuzzy">
+      </label>
+      <label class="inline">cutoff
+        <span class="tip" tabindex="0" data-tip="fuzzy時の近さの基準。1に近いほど厳しく、0に近いほど緩くなります。まずは0.92のまま試し、ヒットが少なければ下げてください。">i</span>
+        <input id="m_cutoff" type="number" step="0.01" min="0" max="1" value="0.92">
+      </label>
+      <label class="inline">workers
+        <span class="tip" tabindex="0" data-tip="並列処理の数。PCが速い場合は2〜4に上げると処理が早くなることがあります。重く感じたら1に戻してください。">i</span>
+        <input id="m_workers" type="number" min="1" value="1">
+      </label>
+      <div class="btn-group">
+        <button id="m_btnRun" class="primary has-tip" data-tip="MODの文章を、公式の英語・日本語の文章と照らし合わせて、対応する訳を探します。結果は3種類のファイルとしてダウンロードできます。">照合して生成</button>
+        <button id="m_btnClear" class="has-tip" data-tip="選んだファイルやフォルダの入力欄を空に戻します。">入力クリア</button>
+      </div>
+      <div id="m_status" class="status"></div>
+    </div>
+
+    <div class="form-row">
+      <div class="btn-group">
+        <button id="m_dlMatched" class="has-tip" data-tip="見つかった訳と、訳が無い行をまとめたXMLを保存します。MODに取り込むための素材になります。">matched.xml を保存</button>
+        <button id="m_dlUnmatched" class="has-tip" data-tip="公式側に見つからなかった行だけを集めたXMLを保存します。新しく追加された文章の確認に使います。">unmatched.xml を保存</button>
+        <button id="m_dlReview" class="has-tip" data-tip="fuzzyがONのときに作られるレビュー用CSVを保存します。表計算ソフトで確認して、あいまい一致の見直しに使えます。">review.csv を保存（fuzzy時）</button>
+        <button id="m_toCompare" class="primary has-tip" data-tip="今の結果を比較タブへ送り、すぐに差分を確認・整形します。">比較へ移行</button>
+      </div>
+      <small class="hint">生成結果はメモリ上に保持されます（ページ遷移まで有効）。</small>
+    </div>
+    <div id="m_resultInfo" class="muted"></div>
+  </section>
 </main>
 
 <footer class="app-footer">
@@ -208,6 +305,9 @@
   <span>API: <code>/search</code>, <code>/query</code>, <code>/entry/:id</code>, <code>/import/xml</code>, <code>/sources</code></span>
 </footer>
 
+<!-- CodeMirror removed -->
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-xml.min.js"></script>
 <script defer src="app.js"></script>
 </body>
 </html>
