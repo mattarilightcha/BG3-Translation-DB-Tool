@@ -47,6 +47,7 @@ button:hover{ background:var(--btn-hover) }
 .menu-list > div label{ flex:1 }
 .ghost{ background:transparent }
 .container{ max-width:1200px; margin:20px auto; padding:0 16px }
+body.wide .container{ max-width:100%; width:100%; }
 
 .card{
   background:var(--card); border:1px solid var(--line); border-radius:12px;
@@ -63,6 +64,7 @@ button:hover{ background:var(--btn-hover) }
 .inline input[type="text"], .inline input[type="number"], .inline select{ padding:6px 8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:8px }
 .hint{ color:var(--muted) }
 .muted{ color:var(--muted) }
+.page-desc{ display:block; color:var(--muted); margin:4px 0 12px }
 .btn-group{ display:flex; gap:8px; flex-wrap:wrap }
 .status{ margin-left:auto; color:var(--muted) }
 .status.ok{ color:#16a34a }
@@ -75,11 +77,37 @@ button:hover{ background:var(--btn-hover) }
 .table thead th{ position:sticky; top:0; background:var(--card); z-index:1 }
 .table tbody tr:hover{ background:rgba(127,127,127,.06) }
 .table code{ background:transparent; padding:0 }
+#compareResult .codebox{ display:block; white-space:pre-wrap; word-break:break-word; padding:0; border:0; background:transparent; font-family: ui-monospace,SFMono-Regular,Consolas,Menlo,monospace; font-size:14px; line-height:1.5 }
+#compareResult .codebox code{ display:block; white-space:pre-wrap; word-break:break-word; tab-size:2 }
+/* Prism のデフォ背景を打ち消し（フォーム風に見えないように） */
+code[class*="language-"], pre[class*="language-"]{ background:transparent !important; box-shadow:none !important }
+#compareResult .sub{ color:var(--muted); font-size:12px; margin:6px 0 0 }
+/* compare table columns */
+#compareResult .col-code{ width:auto }
+#compareResult .col-status{ width:120px; font-weight:600 }
+#compareResult .col-notes{ width:28% }
 .meta{ color:var(--muted); font-size:12px; margin-top:4px }
 mark{ background: #ffe58f46; color: inherit; padding: 0 2px; border-radius:2px }
 
+/* compare coloring */
+.table tr.diff{ background: rgba(255, 128, 0, .06) }
+.table tr.warn{ background: rgba(255, 230, 0, .20) }
+.table tr.ok{ background: transparent }
+.table tr.same{ background: rgba(79, 124, 255, .12) }
+
 /* textarea */
 .terms{ width:100%; min-height:500px; resize:vertical; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--fg) }
+
+/* compare: row hover stronger */
+.table tbody tr:hover{ background:rgba(127,127,127,.12) }
+/* compare table visual separators */
+#compareResult table thead th{ border-right:1px solid var(--line) }
+#compareResult table{ table-layout:fixed }
+#compareResult table tbody td{ border-right:1px solid var(--line); word-break:break-word }
+#compareResult table thead th:last-child, #compareResult table tbody td:last-child{ border-right:none }
+
+/* highlight rows that were auto-filled (JA欠落をENで補完) */
+.filled-from-en{ box-shadow: inset 0 0 0 2px rgba(79,124,255,.35); background: rgba(79,124,255,.08); }
 
 /* multiselect menu */
 .multisel{ position:relative }
@@ -119,6 +147,31 @@ mark{ background: #ffe58f46; color: inherit; padding: 0 2px; border-radius:2px }
 }
 .tip:hover::after, .tip:focus::after{ opacity:1; transform:translate(-50%,-10px); }
 @media (hover:none){ .tip[data-tip]::after{ display:none; } }
+
+/* generic tooltip on any button/element */
+.has-tip{ position:relative }
+.has-tip[data-tip]::after{
+  content:attr(data-tip);
+  position:absolute; z-index:30;
+  left:50%; transform:translate(-50%,-6px); bottom:calc(100% + 10px);
+  background:var(--card); color:var(--fg); border:1px solid var(--line);
+  border-radius:8px; padding:8px 10px; min-width:220px; max-width:420px;
+  box-shadow:var(--shadow); opacity:0; pointer-events:none;
+  white-space:normal; transition:opacity .12s ease, transform .12s ease;
+}
+.has-tip[data-tip]::before{
+  content:""; position:absolute; z-index:29; left:50%; transform:translateX(-50%); bottom:100%;
+  border:6px solid transparent; border-top-color:var(--line);
+}
+.has-tip:hover::after, .has-tip:focus::after{ opacity:1; transform:translate(-50%,-10px); }
+
+/* tooltips that open below the trigger (for header buttons) */
+.has-tip.tip-bottom[data-tip]::after{
+  bottom:auto; top:calc(100% + 10px); transform:translate(-50%,6px);
+}
+.has-tip.tip-bottom[data-tip]::before{
+  bottom:auto; top:100%; border-top-color:transparent; border-bottom-color:var(--line);
+}
 
 /* prompt manager */
 .prompt-grid{display:grid; grid-template-columns:260px 1fr; gap:16px}

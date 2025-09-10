@@ -5,6 +5,15 @@ from typing import List, Dict, Optional, Tuple
 from fastapi.staticfiles import StaticFiles
 import sqlite3, re, io, json, threading, time, webbrowser
 import xml.etree.ElementTree as ET
+import difflib, html
+import os, shutil
+from pathlib import Path
+try:
+    import tkinter as _tk
+    from tkinter import filedialog as _filedialog
+except Exception:
+    _tk = None
+    _filedialog = None
 
 DB_PATH = "data/app.sqlite"
 
@@ -56,10 +65,15 @@ def fts_escape_phrase(s: str) -> str:
 # ---------------- FastAPI app ----------------
 app = FastAPI(title="Translation DB Tool API")
 app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
+_BUNDLES_DIR = Path("data/bundles").resolve()
 
 @app.on_event("startup")
 def _on_startup():
     ensure_schema()
+    try:
+        _BUNDLES_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        print("[BUNDLES] mkdir failed:", e)
     # ブラウザ自動オープン（1回）
     def _open():
         time.sleep(0.7)
@@ -454,3 +468,370 @@ async def import_xml(
         "JA_valid": len(ja_map),
         "common": len(common_keys)
     }
+
+
+# ---------------- BG3 Matcher (MOD↔公式 EN/JA 照合) ----------------
+
+def _normalize_text_bg3(s: str, aggressive: bool = True) -> str:
+    if s is None:
+        return ""
+    s = html.unescape(s)
+    s = re.sub(r"<\s*br\s*/?\s*>", " ", s, flags=re.IGNORECASE)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = s.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    if aggressive:
+        try:
+            import unicodedata
+            s = unicodedata.normalize("NFKC", s)
+        except Exception:
+            pass
+        s = s.strip(" .…")
+    return s
+
+def _read_xml_contents_from_text(text: str) -> List[Tuple[str, str, str]]:
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        cleaned = text[text.find("<"):]
+        root = ET.fromstring(cleaned)
+    rows: List[Tuple[str, str, str]] = []
+    for c in root.iter("content"):
+        uid = (c.attrib.get("contentuid", "") or "").strip()
+        version = (c.attrib.get("version", "") or "1").strip()
+        raw = "".join(c.itertext())
+        rows.append((uid, version, raw))
+    return rows
+
+def _build_official_indexes(off_en_rows: List[Tuple[str, str, str]],
+                            off_ja_rows: List[Tuple[str, str, str]]
+                            ) -> Tuple[Dict[str, List[str]], Dict[str, str], Dict[str, str]]:
+    en_text_to_uids: Dict[str, List[str]] = {}
+    en_uid_to_text: Dict[str, str] = {}
+    for uid, _ver, text in off_en_rows:
+        key = _normalize_text_bg3(text, aggressive=True)
+        if key:
+            lst = en_text_to_uids.get(key)
+            if lst is None:
+                en_text_to_uids[key] = [uid]
+            elif not lst or lst[-1] != uid:
+                lst.append(uid)
+        if uid and uid not in en_uid_to_text:
+            en_uid_to_text[uid] = text
+
+    ja_by_uid: Dict[str, str] = {}
+    for uid, _ver, text in off_ja_rows:
+        ja_by_uid[uid] = text
+
+    return en_text_to_uids, ja_by_uid, en_uid_to_text
+
+def _build_length_buckets(keys: List[str]) -> Dict[int, List[str]]:
+    buckets: Dict[int, List[str]] = {}
+    for k in keys:
+        buckets.setdefault(len(k), []).append(k)
+    for L in list(buckets.keys()):
+        buckets[L].sort()
+    return buckets
+
+def _choose_uid_from_candidates(cands: List[str], ja_by_uid: Dict[str, str]) -> str:
+    for uid in cands:
+        if uid in ja_by_uid:
+            return uid
+    return cands[0] if cands else ""
+
+def _choose_uid_for_text_exact(mod_key: str,
+                               en_text_to_uids: Dict[str, List[str]],
+                               ja_by_uid: Dict[str, str]) -> Tuple[str, str]:
+    if mod_key in en_text_to_uids:
+        return _choose_uid_from_candidates(en_text_to_uids[mod_key], ja_by_uid), "exact"
+    return "", ""
+
+def _choose_uid_for_text_fuzzy(mod_key: str,
+                               en_text_to_uids: Dict[str, List[str]],
+                               ja_by_uid: Dict[str, str],
+                               key_len_buckets: Dict[int, List[str]],
+                               cutoff: float) -> Tuple[str, str]:
+    L = len(mod_key)
+    cand_keys: List[str] = []
+    for dL in (-2, -1, 0, 1, 2):
+        cand_keys.extend(key_len_buckets.get(L + dL, []))
+    if not cand_keys:
+        cand_keys = list(en_text_to_uids.keys())
+    near = difflib.get_close_matches(mod_key, cand_keys, n=1, cutoff=cutoff)
+    if near:
+        key = near[0]
+        return _choose_uid_from_candidates(en_text_to_uids.get(key, []), ja_by_uid), "fuzzy"
+    return "", ""
+
+def _write_contentlist_xml_string(rows: List[Tuple[str, str, str]]) -> str:
+    root = ET.Element("contentList")
+    for uid, ver, text in rows:
+        el = ET.SubElement(root, "content", attrib={"contentuid": uid, "version": ver})
+        el.text = text if text is not None else ""
+    tree = ET.ElementTree(root)
+    try:
+        ET.indent(tree, space="  ", level=0)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    return xml_bytes.decode("utf-8", errors="replace")
+
+def _write_contentlist_xml_sections_string(head_rows: List[Tuple[str, str, str]],
+                                           tail_rows: List[Tuple[str, str, str]],
+                                           tail_label: str = "") -> str:
+    root = ET.Element("contentList")
+    for uid, ver, text in head_rows:
+        el = ET.SubElement(root, "content", attrib={"contentuid": uid, "version": ver})
+        el.text = text if text is not None else ""
+    if tail_rows:
+        root.append(ET.Comment(f" {tail_label or 'JA missing (empty text)'} "))
+        for uid, ver, text in tail_rows:
+            el = ET.SubElement(root, "content", attrib={"contentuid": uid, "version": ver})
+            el.text = text if text is not None else ""
+    tree = ET.ElementTree(root)
+    try:
+        ET.indent(tree, space="  ", level=0)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    return xml_bytes.decode("utf-8", errors="replace")
+
+def _write_review_csv_string(rows: List[Dict[str, str]]) -> str:
+    headers = [
+        "match_kind","mod_uid","mod_version","mod_text",
+        "official_en_uid","official_en_text","official_ja_text"
+    ]
+    buf = io.StringIO()
+    # BOM付き（Excel配慮）
+    buf.write("\ufeff")
+    import csv as _csv
+    w = _csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        w.writerow(r)
+    return buf.getvalue()
+
+def _iter_xml_files_under(dir_path: Path) -> List[Path]:
+    if not dir_path.exists() or not dir_path.is_dir():
+        return []
+    files = [p for p in dir_path.rglob("*.xml") if p.is_file()]
+    files.sort(key=lambda p: str(p).lower())
+    return files
+
+def _safe_join(base: Path, relname: str) -> Path:
+    # 相対パスを安全に連結（.. 無効化）
+    rel = Path(relname).parts
+    segs = [s for s in rel if s not in ("..", "/", "\\")]
+    return (base.joinpath(*segs)).resolve()
+
+def _write_uploads_to_bundle(base: Path, subdir: str, files: List[UploadFile]) -> int:
+    count = 0
+    target = (base / subdir)
+    target.mkdir(parents=True, exist_ok=True)
+    for f in files:
+        try:
+            name = f.filename or "file.xml"
+            # 可能なら相対パスを保持
+            dest = _safe_join(target, name)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            data = f.file.read()
+            with open(dest, "wb") as out:
+                out.write(data)
+            count += 1
+        except Exception as e:
+            print("[BUNDLES] save error:", e)
+    return count
+
+@app.post("/bundles")
+async def create_bundle(
+    enfiles: List[UploadFile] = File(...),
+    jafiles: List[UploadFile] = File(...),
+    label: str = Form("")
+):
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    nid = f"b{ts}-{int(time.time()*1000)%100000}"
+    base = _BUNDLES_DIR / nid
+    base.mkdir(parents=True, exist_ok=True)
+
+    # 保存
+    en_count = _write_uploads_to_bundle(base, "en", enfiles)
+    ja_count = _write_uploads_to_bundle(base, "ja", jafiles)
+
+    meta = {
+        "id": nid,
+        "label": label or "",
+        "created_at": int(time.time()),
+    }
+    try:
+        (base / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print("[BUNDLES] meta write failed:", e)
+
+    return {"id": nid, "label": meta["label"], "en_files": en_count, "ja_files": ja_count}
+
+@app.get("/bundles")
+def list_bundles():
+    out = []
+    if not _BUNDLES_DIR.exists():
+        return {"bundles": out}
+    for d in sorted(_BUNDLES_DIR.iterdir(), key=lambda p: p.name):
+        if not d.is_dir():
+            continue
+        meta = {"id": d.name, "label": "", "created_at": 0}
+        meta_path = d / "meta.json"
+        try:
+            if meta_path.exists():
+                j = json.loads(meta_path.read_text(encoding="utf-8"))
+                meta.update(j)
+        except Exception:
+            pass
+        en_files = len(_iter_xml_files_under(d / "en"))
+        ja_files = len(_iter_xml_files_under(d / "ja"))
+        out.append({"id": meta.get("id", d.name), "label": meta.get("label", ""), "created_at": meta.get("created_at", 0), "en_files": en_files, "ja_files": ja_files})
+    return {"bundles": out}
+
+@app.delete("/bundles/{bundle_id}")
+def delete_bundle(bundle_id: str):
+    base = _BUNDLES_DIR / bundle_id
+    if not base.exists() or not base.is_dir():
+        raise HTTPException(404, "bundle not found")
+    try:
+        shutil.rmtree(base)
+    except Exception as e:
+        raise HTTPException(500, f"failed to delete bundle: {e}")
+    return {"deleted": bundle_id}
+
+@app.post("/match/bg3")
+async def match_bg3(
+    modfile: UploadFile = File(...),
+    en_dir: str = Form(...),
+    ja_dir: str = Form(...),
+    enable_fuzzy: bool = Form(False),
+    cutoff: float = Form(0.92),
+    workers: int = Form(1),
+    base_dir: str = Form("")
+):
+    # 読み込み
+    mod_bytes = await modfile.read()
+    mod_text = mod_bytes.decode("utf-8", errors="replace")
+    mod_rows = _read_xml_contents_from_text(mod_text)
+
+    en_rows: List[Tuple[str, str, str]] = []
+    ja_rows: List[Tuple[str, str, str]] = []
+
+    # 相対ディレクトリ解決（base_dir が指定されていればそれ基準）
+    def _resolve_dir(p: str) -> Path:
+        raw = Path(p)
+        if raw.is_absolute():
+            return raw
+        if base_dir:
+            try:
+                return (Path(base_dir) / raw).resolve()
+            except Exception:
+                return raw.resolve()
+        return raw.resolve()
+
+    base_en = _resolve_dir(en_dir)
+    base_ja = _resolve_dir(ja_dir)
+    if not base_en.exists() or not base_en.is_dir():
+        raise HTTPException(400, f"en_dir invalid: {en_dir}")
+    if not base_ja.exists() or not base_ja.is_dir():
+        raise HTTPException(400, f"ja_dir invalid: {ja_dir}")
+    for fp in _iter_xml_files_under(base_en):
+        try:
+            txt = fp.read_text(encoding="utf-8", errors="replace")
+            en_rows.extend(_read_xml_contents_from_text(txt))
+        except Exception:
+            continue
+    for fp in _iter_xml_files_under(base_ja):
+        try:
+            txt = fp.read_text(encoding="utf-8", errors="replace")
+            ja_rows.extend(_read_xml_contents_from_text(txt))
+        except Exception:
+            continue
+
+    en_map, ja_map, uid2en = _build_official_indexes(en_rows, ja_rows)
+    buckets = _build_length_buckets(list(en_map.keys()))
+
+    matched_ja: List[Tuple[str, str, str]] = []
+    matched_noja: List[Tuple[str, str, str]] = []
+    unmatched_src: List[Tuple[str, str, str]] = []
+    review_rows: List[Dict[str, str]] = []
+
+    for uid, ver, mod_text in mod_rows:
+        mod_key = _normalize_text_bg3(mod_text, aggressive=True)
+        chosen_uid, kind = _choose_uid_for_text_exact(mod_key, en_map, ja_map)
+        if not chosen_uid and enable_fuzzy and mod_key:
+            chosen_uid, kind = _choose_uid_for_text_fuzzy(mod_key, en_map, ja_map, buckets, cutoff)
+
+        if chosen_uid:
+            ja_text = ja_map.get(chosen_uid, "")
+            en_text = uid2en.get(chosen_uid, "")
+            if ja_text:
+                matched_ja.append((uid, ver, ja_text))
+            else:
+                matched_noja.append((uid, ver, ""))
+            review_rows.append({
+                "match_kind": kind or "none",
+                "mod_uid": uid,
+                "mod_version": ver,
+                "mod_text": mod_text,
+                "official_en_uid": chosen_uid,
+                "official_en_text": en_text,
+                "official_ja_text": ja_text,
+            })
+        else:
+            unmatched_src.append((uid, ver, mod_text))
+
+    # 並列時の安全対策（単一スレッドでも影響なし）
+    en_matched_mod_uids = {r["mod_uid"] for r in review_rows if r.get("official_en_uid")}
+    clean_unmatched = [(u, v, t) for (u, v, t) in unmatched_src if u not in en_matched_mod_uids]
+
+    matched_xml = _write_contentlist_xml_sections_string(matched_ja, matched_noja, "JA missing (empty text)")
+    matched_ja_xml = _write_contentlist_xml_string(matched_ja)
+    unmatched_xml = _write_contentlist_xml_string(clean_unmatched)
+    review_csv = _write_review_csv_string(review_rows) if enable_fuzzy else None
+
+    resp = {
+        "counts": {
+            "mod": len(mod_rows),
+            "en": len(en_rows),
+            "ja": len(ja_rows),
+            "matched_ja": len(matched_ja),
+            "matched_noja": len(matched_noja),
+            "unmatched": len(clean_unmatched),
+            "review_rows": len(review_rows),
+        },
+        "matched_xml": matched_xml,
+        "matched_ja_xml": matched_ja_xml,
+        "unmatched_xml": unmatched_xml,
+        "review_csv": review_csv,
+    }
+    return resp
+
+
+# ---------------- Local directory picker (desktop only) ----------------
+@app.get("/pick/dir")
+def pick_dir(title: str = "Select Folder"):
+    # Launch a helper subprocess to run the Tk dialog on its own main thread.
+    # This avoids "main thread is not in main loop" errors inside the web server.
+    import subprocess, sys, shlex
+    code = (
+        "import sys, tkinter as tk\n"
+        "from tkinter import filedialog\n"
+        "root = tk.Tk(); root.withdraw(); root.update()\n"
+        "title = sys.argv[1] if len(sys.argv)>1 else 'Select Folder'\n"
+        "p = filedialog.askdirectory(title=title)\n"
+        "print(p or '')\n"
+    )
+    try:
+        proc = subprocess.run([sys.executable, "-c", code, title], capture_output=True, text=True)
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or '').strip()
+            raise HTTPException(500, f"picker failed (subprocess): {err}")
+        path = (proc.stdout or '').strip()
+        return {"path": path}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"picker failed: {e}")
