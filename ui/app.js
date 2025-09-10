@@ -797,13 +797,18 @@ async function matcherRun(){
   const st = $('#m_status'); st.textContent='送信中…'; st.className='status';
   try{
     const mod = $('#m_modXML').files[0];
-    const enDir = ($('#m_enDir').value||'').trim();
-    const jaDir = ($('#m_jaDir').value||'').trim();
+    let enDir = ($('#m_enDir').value||'').trim();
+    let jaDir = ($('#m_jaDir').value||'').trim();
     const baseDir = ($('#m_baseDir').value||'').trim();
     const fuzzy = $('#m_fuzzy').checked;
     const cutoff = Number($('#m_cutoff').value||0.92);
     const workers = Number($('#m_workers').value||1);
     if(!mod){ st.textContent='MOD XML を選択してください'; st.className='status error'; return; }
+    // 自動補完: base_dir が空でも既定の bg3_official を基準に EN/JA を補う
+    const baseRoot = baseDir || 'data\\bundles\\bg3_official';
+    const sep = (baseRoot.endsWith('\\') || baseRoot.endsWith('/')) ? '' : '\\';
+    if(!enDir){ enDir = baseRoot + sep + 'English'; $('#m_enDir').value = enDir; }
+    if(!jaDir){ jaDir = baseRoot + sep + 'Japanese'; $('#m_jaDir').value = jaDir; }
     if(!enDir || !jaDir){ st.textContent='EN/JA ディレクトリを入力してください'; st.className='status error'; return; }
     const fd = new FormData();
     fd.append('modfile', mod);
