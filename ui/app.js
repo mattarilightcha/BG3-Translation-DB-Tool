@@ -608,10 +608,21 @@ function compareXmlMaps(mapEn, mapJa){
     const ja = mapJa.get(uid) || { text:'', version:null };
     const enNorm = normalizeForCompare(en.text);
     const jaNorm = normalizeForCompare(ja.text);
-    const status = (!mapEn.has(uid)) ? 'ENなし'
-                 : (!mapJa.has(uid)) ? 'JAなし'
-                 : (enNorm === jaNorm) ? '一致'
-                 : '本文差異';
+    let status;
+    if(!mapEn.has(uid)){
+      status = 'ENなし';
+    }else if(!mapJa.has(uid)){
+      status = 'JAなし';
+    }else if(enNorm === jaNorm){
+      // 本文一致だが version が異なるかを追加判定
+      if(en.version !== ja.version && en.version != null && ja.version != null){
+        status = 'version差異';
+      }else{
+        status = '一致';
+      }
+    }else{
+      status = '本文差異';
+    }
     const same_as_en = (status==='一致') && (enNorm !== '') && (enNorm === jaNorm);
     diffs.push({ uid, status, en: en.text, ja: ja.text, ver_en: en.version, ver_ja: ja.version, same_as_en });
   }
@@ -690,7 +701,7 @@ function initCompareBindings(){
         diffs = enUids.map(uid=> map.get(uid) || { uid, status:'JAなし', en: mapEn.get(uid)?.text||'', ja:'', ver_en: mapEn.get(uid)?.version??'', ver_ja:'' });
       }else{
         // まとめ表示：差異→片側なし→一致 の順
-        const order = { '本文差異':0, 'ENなし':1, 'JAなし':2, '一致':3 };
+        const order = { '本文差異':0, 'version差異':0, 'ENなし':1, 'JAなし':2, '一致':3 };
         diffs.sort((a,b)=> (order[a.status]-order[b.status]) || (a.uid<b.uid?-1:a.uid>b.uid?1:0));
       }
       renderCompareTable(diffs);
@@ -699,7 +710,7 @@ function initCompareBindings(){
         eq: diffs.filter(d=>d.status==='一致').length,
         enMiss: diffs.filter(d=>d.status==='ENなし').length,
         jaMiss: diffs.filter(d=>d.status==='JAなし').length,
-        diff: diffs.filter(d=>d.status==='本文差異').length,
+        diff: diffs.filter(d=>d.status==='本文差異' || d.status==='version差異').length,
       };
       st.textContent = `総数 ${counts.total} / 一致 ${counts.eq} / 差異 ${counts.diff} / ENなし ${counts.enMiss} / JAなし ${counts.jaMiss}`;
     }, 10);
