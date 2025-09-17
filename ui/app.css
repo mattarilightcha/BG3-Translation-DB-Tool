@@ -6,11 +6,12 @@
   --shadow: 0 2px 8px rgba(0,0,0,.06);
 }
 :root[data-theme="dark"]{
-  --bg:#0f1115; --fg:#e7eaf1; --muted:#aab2c5;
-  --card:#171a21; --line:#2b3140;
-  --btn:#232836; --btn-hover:#2b3344;
-  --accent:#7aa2ff;
-  --shadow: 0 6px 16px rgba(0,0,0,.35);
+  /* 中立グレー基調 */
+  --bg:#1a1a1a; --fg:#efefef; --muted:#b6bbc6;
+  --card:#222222; --line:#333333;
+  --btn:#2a2a2a; --btn-hover:#343434;
+  --accent:#9ca3af;
+  --shadow: none;
 }
 
 /* base */
@@ -84,7 +85,18 @@ body.wide .container{ max-width:100%; width:100%; }
 #compareResult .codebox{ display:block; white-space:pre-wrap; word-break:break-word; padding:0; border:0; background:transparent; font-family: ui-monospace,SFMono-Regular,Consolas,Menlo,monospace; font-size:14px; line-height:1.5 }
 #compareResult .codebox code{ display:block; white-space:pre-wrap; word-break:break-word; tab-size:2 }
 /* Prism のデフォ背景を打ち消し（フォーム風に見えないように） */
-code[class*="language-"], pre[class*="language-"]{ background:transparent !important; box-shadow:none !important }
+code[class*="language-"], pre[class*="language-"]{ background:transparent !important; box-shadow:none !important; text-shadow:none !important }
+#compareResult .col-code pre.codebox code{ color: var(--fg) }
+/* ダーク: コードブロックの視認性 */
+html[data-theme="dark"] #compareResult .codebox{ background: rgba(255,255,255,.07); padding:10px; border-radius:8px }
+html[data-theme="dark"] #compareResult .codebox code{ color:#f2f4f8 }
+html[data-theme="dark"] mark{ background:#6b72804d; color:inherit }
+html[data-theme="dark"] .token.punctuation{ color:#b2b8c2 }
+html[data-theme="dark"] .token.tag{ color:#e5e7eb }
+html[data-theme="dark"] .token.attr-name{ color:#d1d5db }
+html[data-theme="dark"] .token.attr-value{ color:#e5e7eb }
+html[data-theme="dark"] .token.string{ color:#e5e7eb }
+html[data-theme="dark"] .token.operator{ color:#e5e7eb }
 #compareResult .sub{ color:var(--muted); font-size:12px; margin:6px 0 0 }
 /* compare table columns */
 #compareResult .col-code{ width:auto }
@@ -93,11 +105,19 @@ code[class*="language-"], pre[class*="language-"]{ background:transparent !impor
 .meta{ color:var(--muted); font-size:12px; margin-top:4px }
 mark{ background: #ffe58f46; color: inherit; padding: 0 2px; border-radius:2px }
 
-/* compare coloring */
-.table tr.diff{ background: rgba(255, 128, 0, .06) }
-.table tr.warn{ background: rgba(255, 230, 0, .20) }
-.table tr.ok{ background: transparent }
-.table tr.same{ background: rgba(79, 124, 255, .12) }
+/* compare coloring（状態別の明確な配色） */
+.table tr.st-eq{ background: transparent }
+.table tr.st-body{ background: rgba(255, 128, 0, .08) }
+.table tr.st-version{ background: rgba(0, 170, 255, .10) }
+.table tr.st-both{ background: rgba(255, 64, 64, .12) }
+.table tr.st-en-miss{ background: rgba(186, 104, 200, .12) }
+.table tr.st-ja-miss{ background: rgba(255, 235, 59, .28) }
+.table tr.st-unknown{ background: rgba(127,127,127,.08) }
+
+/* ソートインジケータ */
+th.sortable{ cursor:pointer }
+th.sortable.sort-asc::after{ content:" \25B2"; color:var(--muted) }
+th.sortable.sort-desc::after{ content:" \25BC"; color:var(--muted) }
 
 /* textarea */
 .terms{ width:100%; min-height:500px; resize:vertical; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--fg) }
@@ -112,6 +132,20 @@ mark{ background: #ffe58f46; color: inherit; padding: 0 2px; border-radius:2px }
 
 /* highlight rows that were auto-filled (JA欠落をENで補完) */
 .filled-from-en{ box-shadow: inset 0 0 0 2px rgba(79,124,255,.35); background: rgba(79,124,255,.08); }
+
+/* 更新バナー */
+.update-bar{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 16px; border-bottom:1px solid var(--line); background:#fffbe6; color:#92400e }
+html[data-theme="dark"] .update-bar{ background:#3a3a2a; color:#fcd34d }
+.update-bar.ok{ background:#ecfdf5; color:#065f46 }
+html[data-theme="dark"] .update-bar.ok{ background:#1f2a24; color:#34d399 }
+
+/* 警告アイコン（備考のver差異） */
+.warn-ico{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; color:#fff; background:#dc2626; font-weight:900; font-size:14px; line-height:1; margin-left:8px; cursor:help; user-select:none; box-shadow:0 0 0 2px rgba(220,38,38,.25); transition:transform .12s ease, box-shadow .12s ease, filter .12s ease }
+.warn-ico:hover{ transform:scale(1.1); box-shadow:0 0 0 3px rgba(220,38,38,.35); filter:saturate(1.15) }
+
+/* 浮動ツールチップ（warn-ico用） */
+.tooltip-float{ position:fixed; z-index:1000; pointer-events:none; background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; max-width:420px; box-shadow:var(--shadow); transform:translate(-50%, 0); opacity:0; transition:opacity .12s ease }
+.tooltip-float.show{ opacity:1 }
 
 /* multiselect menu */
 .multisel{ position:relative }
