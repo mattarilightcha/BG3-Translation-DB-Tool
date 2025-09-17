@@ -7,6 +7,7 @@ import sqlite3, re, io, json, threading, time, webbrowser
 import xml.etree.ElementTree as ET
 import difflib, html
 import os, shutil
+import urllib.request as urlrequest
 from pathlib import Path
 try:
     import tkinter as _tk
@@ -63,6 +64,8 @@ def fts_escape_phrase(s: str) -> str:
     return f"\"{(s or '').replace('\"','\"\"')}\""
 
 # ---------------- FastAPI app ----------------
+APP_VERSION = "0.4.0"
+
 app = FastAPI(title="Translation DB Tool API")
 app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
 _BUNDLES_DIR = Path("data/bundles").resolve()
@@ -82,6 +85,61 @@ def _on_startup():
         except Exception:
             pass
     threading.Thread(target=_open, daemon=True).start()
+
+# ---------------- Version / Update ----------------
+def _fetch_latest_version(repo: str = "mattarilightcha/BG3-Translation-DB-Tool") -> str:
+    api = f"https://api.github.com/repos/{repo}/releases/latest"
+    try:
+        with urlrequest.urlopen(api, timeout=4) as resp:
+            data = resp.read().decode("utf-8", errors="replace")
+            j = json.loads(data)
+            tag = str(j.get("tag_name") or "").strip()
+            if tag.lower().startswith("v"):
+                tag = tag[1:]
+            return tag or APP_VERSION
+    except Exception:
+        return APP_VERSION
+
+def _version_tuple(v: str) -> tuple:
+    import re as _re
+    parts = _re.split(r"[^0-9]+", v or "")
+    nums = [int(p) for p in parts if p.isdigit()]
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums[:3])
+
+@app.get("/version")
+def version_info():
+    latest = _fetch_latest_version()
+    is_outdated = _version_tuple(latest) > _version_tuple(APP_VERSION)
+    repo = "https://github.com/mattarilightcha/BG3-Translation-DB-Tool"
+    return {
+        "current": APP_VERSION,
+        "latest": latest,
+        "is_outdated": is_outdated,
+        "repo": repo,
+        "release_url": repo + "/releases/latest",
+    }
+
+@app.post("/update")
+def do_update():
+    # Git が使える環境で fetch → pull --rebase を実行
+    import subprocess
+    if not os.path.isdir('.git'):
+        raise HTTPException(400, "git repository not found in working dir")
+    def run(cmd: list[str]) -> tuple[int, str]:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, shell=False)
+            out = (p.stdout or '') + (p.stderr or '')
+            return p.returncode, out
+        except Exception as e:
+            return 1, str(e)
+    rc1, log1 = run(["git", "fetch", "--all", "--tags"])
+    rc_b, cur = run(["git", "rev-parse", "--abbrev-ref", "HEAD"]) 
+    branch = (cur or "main").strip() if rc_b == 0 else "main"
+    rc2, log2 = run(["git", "pull", "--rebase", "origin", branch])
+    ok = (rc1 == 0 and rc2 == 0)
+    return {"ok": ok, "branch": branch, "logs": (log1 + "\n" + log2).strip()}
 
 @app.get("/health")
 def health():
