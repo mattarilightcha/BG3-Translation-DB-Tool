@@ -7,6 +7,7 @@ import sqlite3, re, io, json, threading, time, webbrowser
 import xml.etree.ElementTree as ET
 import difflib, html
 import os, shutil
+import zipfile
 import urllib.request as urlrequest
 from pathlib import Path
 try:
@@ -121,25 +122,101 @@ def version_info():
         "release_url": repo + "/releases/latest",
     }
 
+def _copytree_overwrite(src: Path, dst: Path, preserve: set[str]) -> int:
+    copied = 0
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        if rel == ".":
+            rel = ""
+        # preserve ディレクトリ配下はスキップ
+        parts = rel.split(os.sep) if rel else []
+        if parts and parts[0] in preserve:
+            dirs[:] = []
+            continue
+        # 出力先ディレクトリ
+        out_dir = dst if not rel else dst / rel
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # ファイルを上書きコピー
+        for name in files:
+            if parts and parts[0] in preserve:
+                continue
+            src_fp = Path(root) / name
+            dst_fp = out_dir / name
+            try:
+                shutil.copy2(src_fp, dst_fp)
+                copied += 1
+            except Exception as e:
+                print("[UPDATE/ZIP] copy failed:", src_fp, "->", dst_fp, e)
+    return copied
+
+def _update_by_archive(latest: str, repo: str = "mattarilightcha/BG3-Translation-DB-Tool") -> tuple[bool, str]:
+    # latest は "0.4.1" 形式を想定。タグZIPは v 接頭が必要
+    tag = latest.strip()
+    if not tag:
+        return False, "empty latest version"
+    vtag = tag if tag.lower().startswith("v") else ("v" + tag)
+    zip_url = f"https://github.com/{repo}/archive/refs/tags/{vtag}.zip"
+    logs = [f"[UPDATE/ZIP] url={zip_url}"]
+    try:
+        tmp_base = Path(".upd_tmp").resolve()
+        if tmp_base.exists():
+            shutil.rmtree(tmp_base, ignore_errors=True)
+        tmp_base.mkdir(parents=True, exist_ok=True)
+        zip_path = tmp_base / f"{vtag}.zip"
+        # ダウンロード
+        with urlrequest.urlopen(zip_url, timeout=30) as resp:
+            data = resp.read()
+        with open(zip_path, "wb") as f:
+            f.write(data)
+        logs.append(f"[UPDATE/ZIP] downloaded {len(data)} bytes")
+        # 解凍
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            zf.extractall(tmp_base)
+        # ルートディレクトリ推定: repo-<tag-name> または <repo>-<tag>
+        extracted_dirs = [p for p in tmp_base.iterdir() if p.is_dir() and p.name != ".git"]
+        if not extracted_dirs:
+            return False, "no extracted directory found"
+        src_root = extracted_dirs[0]
+        # 現在の作業ディレクトリに上書きコピー（data/ は保持）
+        cwd = Path(".").resolve()
+        preserve = {"data"}
+        copied = _copytree_overwrite(src_root, cwd, preserve)
+        logs.append(f"[UPDATE/ZIP] copied files: {copied}")
+        # 一時削除
+        try:
+            shutil.rmtree(tmp_base, ignore_errors=True)
+        except Exception:
+            pass
+        return True, "\n".join(logs)
+    except Exception as e:
+        logs.append(f"[UPDATE/ZIP] failed: {e}")
+        return False, "\n".join(logs)
+
 @app.post("/update")
 def do_update():
-    # Git が使える環境で fetch → pull --rebase を実行
+    # 1) Git がある場合: fetch → pull --rebase
     import subprocess
-    if not os.path.isdir('.git'):
-        raise HTTPException(400, "git repository not found in working dir")
-    def run(cmd: list[str]) -> tuple[int, str]:
-        try:
-            p = subprocess.run(cmd, capture_output=True, text=True, shell=False)
-            out = (p.stdout or '') + (p.stderr or '')
-            return p.returncode, out
-        except Exception as e:
-            return 1, str(e)
-    rc1, log1 = run(["git", "fetch", "--all", "--tags"])
-    rc_b, cur = run(["git", "rev-parse", "--abbrev-ref", "HEAD"]) 
-    branch = (cur or "main").strip() if rc_b == 0 else "main"
-    rc2, log2 = run(["git", "pull", "--rebase", "origin", branch])
-    ok = (rc1 == 0 and rc2 == 0)
-    return {"ok": ok, "branch": branch, "logs": (log1 + "\n" + log2).strip()}
+    if os.path.isdir('.git'):
+        def run(cmd: list[str]) -> tuple[int, str]:
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True, shell=False)
+                out = (p.stdout or '') + (p.stderr or '')
+                return p.returncode, out
+            except Exception as e:
+                return 1, str(e)
+        rc1, log1 = run(["git", "fetch", "--all", "--tags"])
+        rc_b, cur = run(["git", "rev-parse", "--abbrev-ref", "HEAD"]) 
+        branch = (cur or "main").strip() if rc_b == 0 else "main"
+        rc2, log2 = run(["git", "pull", "--rebase", "origin", branch])
+        ok = (rc1 == 0 and rc2 == 0)
+        return {"ok": ok, "mode": "git", "branch": branch, "logs": (log1 + "\n" + log2).strip()}
+
+    # 2) Git が無い場合: GitHub タグZIPで上書き更新（data/ は保持）
+    latest = _fetch_latest_version()
+    if _version_tuple(latest) <= _version_tuple(APP_VERSION):
+        return {"ok": True, "mode": "zip", "logs": "already up-to-date"}
+    ok, logs = _update_by_archive(latest)
+    return {"ok": ok, "mode": "zip", "logs": logs}
 
 @app.get("/health")
 def health():
