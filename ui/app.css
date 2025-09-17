@@ -27,6 +27,10 @@ code,kbd,pre{font-family: ui-monospace,SFMono-Regular,Consolas,Menlo,monospace}
   padding:16px 20px; border-bottom:1px solid var(--line); background:var(--card);
   position:sticky; top:0; z-index:10;
 }
+.update-bar{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 16px; border-bottom:1px solid var(--line); background:#fffbe6; color:#92400e }
+html[data-theme="dark"] .update-bar{ background:#3a3a2a; color:#fcd34d }
+.update-bar.ok{ background:#ecfdf5; color:#065f46 }
+html[data-theme="dark"] .update-bar.ok{ background:#1f2a24; color:#34d399 }
 .brand h1{margin:0; font-size:20px; font-weight:700}
 .brand small{display:block; color:var(--muted)}
 .actions{display:flex; gap:8px; align-items:center}

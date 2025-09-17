@@ -409,9 +409,65 @@ initSearchBindings();
           }catch(e){ console.error(e); bar.innerHTML = `<span>更新エラー: ${e?.message||e}</span>`; }
         });
       }
+    } else {
+      // 最新の場合も明示
+      let bar = document.querySelector('#updateBar');
+      if(!bar){
+        bar = document.createElement('div');
+        bar.id = 'updateBar';
+        bar.className = 'update-bar ok';
+        bar.textContent = `最新です（現在 ${info.current}）`;
+        document.querySelector('.app-header')?.after(bar);
+      }
     }
   }catch(e){ /* ignore */ }
 })();
+
+// 手動確認ボタン
+document.getElementById('checkUpdate')?.addEventListener('click', async ()=>{
+  try{
+    const res = await fetch('/version');
+    if(!res.ok) { alert('確認に失敗しました'); return; }
+    const info = await res.json();
+    if(info && info.is_outdated){
+      // 既存のバナーがなければ作成
+      if(!document.querySelector('#updateBar')){
+        const bar = document.createElement('div');
+        bar.id = 'updateBar';
+        bar.className = 'update-bar';
+        bar.innerHTML = `
+          <span>新しいバージョンがあります：<b>${info.latest}</b>（現在 ${info.current}）</span>
+          <div class="btn-group">
+            <a class="ghost" href="${info.release_url}" target="_blank">リリースを見る</a>
+            <button id="btnDoUpdate" class="primary">このツールを更新</button>
+          </div>`;
+        document.querySelector('.app-header')?.after(bar);
+        document.querySelector('#btnDoUpdate')?.addEventListener('click', async ()=>{
+          const btn = document.querySelector('#btnDoUpdate'); if(btn) btn.disabled=true;
+          try{
+            const r = await fetch('/update', {method:'POST'});
+            const j = await r.json();
+            if(j && j.ok){
+              bar.innerHTML = `<span>更新が完了しました。ページを再読み込みしてください。</span>`;
+            }else{
+              bar.innerHTML = `<span>更新に失敗しました。ログを確認してください。</span>`;
+              console.log('[UPDATE]', j);
+            }
+          }catch(e){ alert('更新エラー: '+(e?.message||e)); }
+        });
+      }
+    }else{
+      let bar = document.querySelector('#updateBar');
+      if(!bar){
+        bar = document.createElement('div');
+        bar.id = 'updateBar';
+        bar.className = 'update-bar ok';
+        bar.textContent = `最新です（現在 ${info.current}）`;
+        document.querySelector('.app-header')?.after(bar);
+      }
+    }
+  }catch(e){ alert('確認エラー: '+(e?.message||e)); }
+});
 
 // ===== Import (XML) =====
 function initImportBindings(){
