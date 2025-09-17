@@ -54,20 +54,25 @@
     <!-- 概要tipはボタンツールチップへ統合 -->
     <div class="form-row">
       <label class="inline">キーワード
+        <span class="tip" tabindex="0" data-tip="日本語・英語の両方で検索できます。空白区切りの複数語はAND扱い（FTS）。">i</span>
         <input id="q" type="text" placeholder="saving throw">
       </label>
       <label class="inline">size
+        <span class="tip" tabindex="0" data-tip="1〜10000。1ページあたりの件数です。多すぎると表示が重くなります。">i</span>
         <input id="size" type="number" value="20" min="1" max="10000">
       </label>
       <label class="inline">page
+        <span class="tip" tabindex="0" data-tip="ページ番号です。1 始まり。">i</span>
         <input id="page" type="number" value="1" min="1">
       </label>
       <label class="inline">min_priority
+        <span class="tip" tabindex="0" data-tip="この値以上のデータのみ表示。値が小さいほど“強い訳”として優先度が高い想定です。">i</span>
         <input id="s_minprio" type="number" placeholder="">
       </label>
       <label class="inline">
         <input id="hideDup" type="checkbox">
         重複を非表示
+        <span class="tip" tabindex="0" data-tip="EN/JAの文字列が完全同一の重複ペアを一覧から除外します。">i</span>
       </label>
       <div class="btn-group">
         <button id="btnSearch" class="primary has-tip" data-tip="全文検索を実行します。入力中のキーワードでEN/JA列を検索し、size/page・優先度下限・ソース選択を反映して結果を表示します。">検索</button>
@@ -98,25 +103,31 @@
     <!-- 概要tipはボタンツールチップへ統合 -->
     <div class="form-row">
       <label class="inline">Top-K
-        <input id="topk" type="number" value="3" min="1" max="10" class="has-tip" data-tip="語ごとに返す候補の件数。多すぎるとノイズが増えるため3〜5件を推奨。">
+        <span class="tip" tabindex="0" data-tip="語ごとに返す候補の件数。多すぎるとノイズが増えるため3〜5件を推奨。">i</span>
+        <input id="topk" type="number" value="3" min="1" max="10">
       </label>
       <label class="inline">max_len
-        <input id="maxlen" type="number" value="240" min="0" max="1000" class="has-tip" data-tip="候補文が長すぎる場合に前後を省略する最大文字数。0で無制限。">
+        <span class="tip" tabindex="0" data-tip="候補文が長すぎる場合に前後を省略する最大文字数。0で無制限。">i</span>
+        <input id="maxlen" type="number" value="240" min="0" max="1000">
       </label>
-      <label class="inline has-tip" data-tip="英語の完全一致を最優先で採用し、不足分だけ全文検索で補います。誤マッチを抑えて確度を上げたい場合に有効。">
+      <label class="inline">
         <input id="exact" type="checkbox" checked>
         完全一致優先
+        <span class="tip" tabindex="0" data-tip="英語の完全一致を最優先で採用し、不足分だけ全文検索で補います。誤マッチを抑えて確度を上げたい場合に有効。">i</span>
       </label>
-      <label class="inline has-tip" data-tip="英語のみ対象。全文検索でヒットした語の周辺を正規表現の単語境界(\\b)で再確認し、偶然の部分一致を除外します。">
+      <label class="inline">
         <input id="wb" type="checkbox">
         単語境界（厳密）
+        <span class="tip" tabindex="0" data-tip="英語のみ対象。語の前後が空白・句読点・文頭/文末などの境界にある場合のみ一致を採用します。例: 'cat' は 'black cat' には一致しますが 'concatenate' には一致しません。">i</span>
       </label>
       <label class="inline">min_priority
-        <input id="minprio" type="number" placeholder="" class="has-tip" data-tip="この値以上のデータのみを候補に含めます。数が小さいほど“強い訳”として扱う想定です。">
+        <span class="tip" tabindex="0" data-tip="この値以上のデータのみを候補に含めます。数が小さいほど“強い訳”として扱う想定です。">i</span>
+        <input id="minprio" type="number" placeholder="">
       </label>
 
       <!-- プロンプト選択/挿入 -->
       <label class="inline">プロンプト
+        <span class="tip" tabindex="0" data-tip="選択したテンプレート文を、結果のコピー/保存（JSONL/TSV/CSV）に前置できます。">i</span>
         <select id="promptSelect"></select>
         <button id="managePrompts" class="ghost" title="プロンプトを編集">編集</button>
       </label>
@@ -216,7 +227,7 @@
 
   <!-- 比較（XML差分） -->
   <section id="panel-compare" class="card" role="tabpanel" aria-labelledby="tab-compare" hidden>
-    <p class="page-desc">EN/JAのXMLからcontentuid単位で本文を抽出し、UIDごとに一致・差異・片側欠落を分類して表示します。整形・補完ボタンも用意しています。</p>
+    <p class="page-desc">EN/JAのXMLからcontentuid単位で本文を抽出し、UUIDごとに一致・差異・片側欠落を分類して表示します。整形・補完ボタンも用意しています。</p>
     <!-- 全幅切替はヘッダーへ移動 -->
     <div class="form-row">
       <label class="inline">表示モード
@@ -237,10 +248,11 @@
     </div>
     <div class="form-row">
       <div class="btn-group">
-        <button id="btnCompare" class="primary has-tip" data-tip="左の英語XMLと右の日本語XMLを解析し、contentuid単位で一致・差異・片側欠落を分類して一覧化します。EN順では英語UIDの順序で並べ替え、まとめ表示では差異→片側欠落→一致の順で俯瞰できます。">比較する</button>
-        <button id="btnFormatJA" class="has-tip" data-tip="右の日本語XMLを、左の英語XMLのUID順に再配置します。存在しないUIDはコメントで示し、version属性がある場合は保持します。原文順に整えてレビューや差分検出を行いやすくします。">JAをEN順に整形</button>
+        <button id="btnCompare" class="primary has-tip" data-tip="左の英語XMLと右の日本語XMLを解析し、contentuid単位で一致・差異・片側欠落を分類して一覧化します。EN順では英語UUIDの順序で並べ替え、まとめ表示では差異→片側欠落→一致の順で俯瞰できます。">比較する</button>
+        <button id="btnFormatJA" class="has-tip" data-tip="右の日本語XMLを、左の英語XMLのUUID順に再配置します。存在しないUUIDはコメントで示し、version属性がある場合は保持します。原文順に整えてレビューや差分検出を行いやすくします。">JAをEN順に整形</button>
         <button id="btnPrettyJA" class="has-tip" data-tip="右の日本語XMLの出現順を維持したまま整形し、余分な空白を整理します。元の順序を崩さずに可読性だけを高めたい場合に使用します。">JA整形（順序維持）</button>
-        <button id="btnFillJAFromEN" class="has-tip" data-tip="英語側に存在し日本語側に欠落しているUIDについて、英語の<content>要素を転写して空所を補完します。後で手動で訳文を入れやすくするための下準備です。">JA欠落をENで補完</button>
+        <button id="btnFillJAFromEN" class="has-tip" data-tip="英語側に存在し日本語側に欠落しているUUIDについて、英語の<content>要素を転写して空所を補完します。後で手動で訳文を入れやすくするための下準備です。">JA欠落をENで補完</button>
+        <button id="btnAlignVer" class="has-tip" data-tip="右の日本語XML各行のversionを、左（原文:EN）側のversionに揃えます。原文側のversionを最新とみなしてコピーします。">verをENに合わせる</button>
         <button id="btnClearCompare" class="has-tip" data-tip="左右のテキスト欄と比較結果をすべてクリアします。作業をやり直したいときに使用します。">クリア</button>
         <button id="btnCopyNoJA" class="has-tip" data-tip="一覧から『JAなし』の行だけを抽出し、クリップボードへコピーします。レビューの優先付けに便利です。">JAなしをコピー</button>
       </div>

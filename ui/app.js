@@ -376,6 +376,43 @@ function initSearchBindings(){
 }
 initSearchBindings();
 
+// ===== Update notifier =====
+(async function checkUpdate(){
+  try{
+    const res = await fetch('/version');
+    if(!res.ok) return;
+    const info = await res.json();
+    if(info && info.is_outdated){
+      let bar = document.querySelector('#updateBar');
+      if(!bar){
+        bar = document.createElement('div');
+        bar.id = 'updateBar';
+        bar.className = 'update-bar';
+        bar.innerHTML = `
+          <span>新しいバージョンがあります：<b>${info.latest}</b>（現在 ${info.current}）</span>
+          <div class="btn-group">
+            <a class="ghost" href="${info.release_url}" target="_blank">リリースを見る</a>
+            <button id="btnDoUpdate" class="primary">このツールを更新</button>
+          </div>`;
+        document.querySelector('.app-header')?.after(bar);
+        document.querySelector('#btnDoUpdate')?.addEventListener('click', async ()=>{
+          const btn = document.querySelector('#btnDoUpdate'); if(btn) btn.disabled=true;
+          try{
+            const r = await fetch('/update', {method:'POST'});
+            const j = await r.json();
+            if(j && j.ok){
+              bar.innerHTML = `<span>更新が完了しました。ページを再読み込みしてください。</span>`;
+            }else{
+              bar.innerHTML = `<span>更新に失敗しました。ログを確認してください。</span>`;
+              console.log('[UPDATE]', j);
+            }
+          }catch(e){ console.error(e); bar.innerHTML = `<span>更新エラー: ${e?.message||e}</span>`; }
+        });
+      }
+    }
+  }catch(e){ /* ignore */ }
+})();
+
 // ===== Import (XML) =====
 function initImportBindings(){
   const btn = $('#btnXML'); const st  = $('#importStatus');
@@ -580,13 +617,17 @@ function parseLocaXmlInline(xmlText){
   const result = new Map(); // uid -> { text, version, raw }
   if(!xmlText || !xmlText.trim()) return result;
   try{
-    // 高速・寛容な抽出：<content ...contentuid="..." ... version="..."> ... </content>
-    const re = /<content\b[^>]*?contentuid\s*=\s*"([^"]+)"[^>]*?(?:version\s*=\s*"(\d+)")?[^>]*>([\s\S]*?)<\/content>/gi;
+    // 属性の順序に依存しない抽出：<content ...> ... </content>
+    const re = /<content\b([^>]*)>([\s\S]*?)<\/content>/gi;
     let m;
     while((m = re.exec(xmlText))){
-      const uid = m[1];
-      const ver = m[2] ? Number(m[2]) : null;
-      const inner = m[3]||'';
+      const attrs = m[1] || '';
+      const uidM = /contentuid\s*=\s*"([^"]+)"/i.exec(attrs);
+      if(!uidM) continue;
+      const uid = uidM[1];
+      const verM = /version\s*=\s*"([^"]+)"/i.exec(attrs);
+      const ver = verM ? verM[1] : null; // 文字列のまま保持
+      const inner = m[2] || '';
       // テキスト抽出（簡易）：タグ除去 → 連続空白を1つに
       const text = inner.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       result.set(uid, { text, version: ver, raw: m[0] });
@@ -608,18 +649,23 @@ function compareXmlMaps(mapEn, mapJa){
     const ja = mapJa.get(uid) || { text:'', version:null };
     const enNorm = normalizeForCompare(en.text);
     const jaNorm = normalizeForCompare(ja.text);
+    const verEn = (en.version===null || en.version===undefined) ? '' : String(en.version);
+    const verJa = (ja.version===null || ja.version===undefined) ? '' : String(ja.version);
+    const textEq = (enNorm === jaNorm);
+    const verEq  = (verEn === verJa);
     let status;
     if(!mapEn.has(uid)){
       status = 'ENなし';
     }else if(!mapJa.has(uid)){
       status = 'JAなし';
-    }else if(enNorm === jaNorm){
-      // 本文一致だが version が異なるかを追加判定
-      if(en.version !== ja.version && en.version != null && ja.version != null){
-        status = 'version差異';
-      }else{
-        status = '一致';
-      }
+    }else if(textEq && verEq){
+      status = '一致';
+    }else if(!textEq && !verEq){
+      status = '本文差異+version差異';
+    }else if(!textEq){
+      status = '本文差異';
+    }else if(!verEq){
+      status = 'version差異';
     }else{
       status = '本文差異';
     }
@@ -633,31 +679,50 @@ function renderCompareTable(rows){
   const wrap = $('#compareResult'); if(!wrap) return;
   if(!rows.length){ wrap.innerHTML = '<div class="hint">結果なし</div>'; return; }
   const esc = escapeHtml;
+  const statusClass = (s)=>{
+    if(s==='一致') return 'st-eq';
+    if(s==='本文差異+version差異') return 'st-both';
+    if(s==='本文差異') return 'st-body';
+    if(s==='version差異') return 'st-version';
+    if(s==='ENなし') return 'st-en-miss';
+    if(s==='JAなし') return 'st-ja-miss';
+    return 'st-unknown';
+  };
   const buildRow = (r)=> {
-    const klass = r.status==='一致' ? (r.same_as_en ? 'same' : 'ok') : (r.status.includes('なし') ? 'warn' : 'diff');
+    const klass = statusClass(r.status);
     const verAttr = (v)=> (v===null || v===undefined || v==='') ? '' : ` version="${v}"`;
     const xmlRaw = `<content contentuid="${r.uid}"${verAttr(r.ver_en)}>${r.en||''}</content>`;
     const xml = `<code class=\"language-xml\">${escapeHtml(xmlRaw)}</code>`;
-    const notes = [];
-    if(r.ver_en!==undefined) notes.push(`verEN=${escapeHtml(String(r.ver_en??''))}`);
-    if(r.ver_ja!==undefined) notes.push(`verJA=${escapeHtml(String(r.ver_ja??''))}`);
+    const vEN = String(r.ver_en ?? '');
+    const vJA = String(r.ver_ja ?? '');
+    const verEq = (vEN !== '' && vEN === vJA);
     const jaPrev = (r.ja||'').slice(0, 120);
-    if(jaPrev) notes.push(`JAプレビュー: ${escapeHtml(jaPrev)}`);
-    const note = notes.join(' / ');
+    let noteHtml = '';
+    if(verEq){
+      const preview = jaPrev ? `\n<span class=\"sub\">JAプレビュー: ${escapeHtml(jaPrev)}</span>` : '';
+      noteHtml = `[ver一致]${preview}`;
+    }else{
+      // ver違い時のみバージョン表示＋警告マーク
+      const warn = `<span class=\"warn-ico has-tip\" data-tip=\"警告：原文のバージョンが新しいです。そもそも原文が変化している可能性があります。最新版のENと古いENを突き合わせて、変更点を調べてください！\">⚠</span>`;
+      const verline = `verEN=${escapeHtml(vEN)} / verJA=${escapeHtml(vJA)} / ${warn}`;
+      const preview = jaPrev ? `\n<span class=\"sub\">JAプレビュー: ${escapeHtml(jaPrev)}</span>` : '';
+      noteHtml = `<span class=\"verline\">${verline}</span>${preview}`;
+    }
+    if(!noteHtml) noteHtml = '<span class=\"muted\">—</span>';
     return `
     <tr class="${klass}">
       <td class="col-code"><pre class="codebox">${xml}</pre></td>
       <td class="col-status">${escapeHtml(r.status)}</td>
-      <td class="col-notes">${note||'<span class=\"muted\">—</span>'}</td>
+      <td class="col-notes">${noteHtml}</td>
     </tr>`;
   };
   wrap.innerHTML = `
     <table class="table">
       <thead>
         <tr>
-          <th>原文</th>
-          <th style="width:120px">状態</th>
-          <th style="width:28%">備考</th>
+          <th class="sortable" data-sort="uid">原文</th>
+          <th class="sortable" data-sort="status" style="width:120px">状態</th>
+          <th class="sortable" data-sort="ver" style="width:28%">備考</th>
         </tr>
       </thead>
       <tbody>
@@ -665,6 +730,50 @@ function renderCompareTable(rows){
       </tbody>
     </table>`;
   try{ if(window.Prism){ Prism.highlightAllUnder(wrap); } }catch{}
+
+  // 保存してソートハンドラを付与
+  window._compareRows = rows.slice();
+  window._compareSort = window._compareSort || { key:'', dir:1 };
+  // 状態の優先度: version差異系 → 一致系 → 欠落系（JA/EN）→ 本文差異
+  const orderRank = {
+    '本文差異+version差異': 0,
+    'version差異': 1,
+    '一致': 2,
+    'JAなし': 3,
+    'ENなし': 3,
+    '本文差異': 4
+  };
+  function cmp(a,b,key){
+    if(key==='uid') return a.uid<b.uid?-1:a.uid>b.uid?1:0;
+    if(key==='status'){
+      const av = orderRank[a.status] ?? 9; const bv = orderRank[b.status] ?? 9;
+      if(av!==bv) return av-bv; return a.uid<b.uid?-1:a.uid>b.uid?1:0;
+    }
+    if(key==='ver'){
+      const ak = String(a.ver_en??'')+"|"+String(a.ver_ja??'');
+      const bk = String(b.ver_en??'')+"|"+String(b.ver_ja??'');
+      if(ak!==bk) return ak<bk?-1:1; return a.uid<b.uid?-1:a.uid>b.uid?1:0;
+    }
+    return 0;
+  }
+  function setIndicators(){
+    wrap.querySelectorAll('th.sortable').forEach(th=>{ th.classList.remove('sort-asc','sort-desc'); });
+    const cur = window._compareSort;
+    if(cur && cur.key){
+      const th = wrap.querySelector(`th.sortable[data-sort="${cur.key}"]`);
+      if(th) th.classList.add(cur.dir===1?'sort-asc':'sort-desc');
+    }
+  }
+  setIndicators();
+  wrap.querySelector('thead')?.addEventListener('click', (e)=>{
+    const th = e.target.closest('th.sortable'); if(!th) return;
+    const key = th.getAttribute('data-sort'); if(!key) return;
+    const cur = window._compareSort || {key:'',dir:1};
+    const dir = (cur.key===key) ? -cur.dir : 1;
+    window._compareSort = { key, dir };
+    const sorted = window._compareRows.slice().sort((a,b)=> dir * cmp(a,b,key));
+    renderCompareTable(sorted);
+  });
 }
 
 function initCompareBindings(){
@@ -694,14 +803,14 @@ function initCompareBindings(){
       const mapJa = parseLocaXmlInline(jaText);
       let diffs = compareXmlMaps(mapEn, mapJa);
       if(mode==='align'){
-        // EN順（英語のUID順）で表示。JA欠落はwarnで可視化
+        // EN順（英語のUUID順）で表示。JA欠落はwarnで可視化
         diffs = diffs.filter(d=> mapEn.has(d.uid));
         const enUids = [...mapEn.keys()];
         const map = new Map(diffs.map(d=>[d.uid,d]));
         diffs = enUids.map(uid=> map.get(uid) || { uid, status:'JAなし', en: mapEn.get(uid)?.text||'', ja:'', ver_en: mapEn.get(uid)?.version??'', ver_ja:'' });
       }else{
-        // まとめ表示：差異→片側なし→一致 の順
-        const order = { '本文差異':0, 'version差異':0, 'ENなし':1, 'JAなし':2, '一致':3 };
+        // まとめ表示：version差異系 → 一致 → 欠落系（JA/EN）→ 本文差異
+        const order = { '本文差異+version差異':0, 'version差異':1, '一致':2, 'JAなし':3, 'ENなし':3, '本文差異':4 };
         diffs.sort((a,b)=> (order[a.status]-order[b.status]) || (a.uid<b.uid?-1:a.uid>b.uid?1:0));
       }
       renderCompareTable(diffs);
@@ -710,7 +819,7 @@ function initCompareBindings(){
         eq: diffs.filter(d=>d.status==='一致').length,
         enMiss: diffs.filter(d=>d.status==='ENなし').length,
         jaMiss: diffs.filter(d=>d.status==='JAなし').length,
-        diff: diffs.filter(d=>d.status==='本文差異' || d.status==='version差異').length,
+        diff: diffs.filter(d=> d.status==='本文差異' || d.status==='version差異' || d.status==='本文差異+version差異').length,
       };
       st.textContent = `総数 ${counts.total} / 一致 ${counts.eq} / 差異 ${counts.diff} / ENなし ${counts.enMiss} / JAなし ${counts.jaMiss}`;
     }, 10);
@@ -752,6 +861,32 @@ function initCompareBindings(){
     $('#cmpJA').value = formatted;
     st.textContent = `JAを整形しました（順序維持、${order.length}件）。`;
   });
+  $('#btnAlignVer')?.addEventListener('click', ()=>{
+    const enText = $('#cmpEN').value || '';
+    const jaText = $('#cmpJA').value || '';
+    const mapEn = parseLocaXmlInline(enText);
+    const mapJa = parseLocaXmlInline(jaText);
+    const enUids = [...mapEn.keys()];
+    const piece = (uid)=>{
+      const en = mapEn.get(uid);
+      const ja = mapJa.get(uid);
+      if(!en && !ja) return `<!-- missing: ${uid} -->`;
+      const text = (ja?.text ?? en?.text ?? '') || '';
+      const ver = (en?.version==null || en?.version==='') ? '' : ` version="${en.version}"`;
+      return `<content contentuid="${uid}"${ver}>${escapeHtml(text)}</content>`;
+    };
+    const formatted = enUids.map(piece).join('\n');
+    const wrap = (function extractXmlWrapper(xmlText){
+      const text = String(xmlText||'');
+      const decl = (text.match(/^\s*<\?xml[\s\S]*?\?>/i)||[])[0] || '';
+      const open = (text.match(/<contentList\b[^>]*>/i)||[])[0] || '';
+      const close = /<\/contentList>/i.test(text) ? '</contentList>' : (open ? '</contentList>' : '');
+      return { decl, openTag: open, closeTag: close };
+    })(enText);
+    const wrapped = `${wrap.decl?wrap.decl+'\n':''}${wrap.openTag||'<contentList>'}\n${formatted}\n${wrap.closeTag}`;
+    $('#cmpJA').value = wrapped;
+    $('#compareStatus').textContent = 'JA側のversionをEN側のversionに合わせました（原文を最新とみなして反映）。';
+  });
   $('#btnFillJAFromEN')?.addEventListener('click', ()=>{
     const enText = $('#cmpEN').value || '';
     const jaText = $('#cmpJA').value || '';
@@ -792,13 +927,65 @@ function initCompareBindings(){
       const tbody = document.querySelector('#compareResult tbody'); if(!tbody) return;
       const rows = [...tbody.rows];
       const texts = rows.filter(r=>/JAなし/.test(r.querySelector('.col-status')?.textContent||''))
-        .map(r=> (r.querySelector('.codebox')?.innerText||'').replace(/\n+/g,'\n').trim())
+        .map(r=> {
+          const code = r.querySelector('.codebox')?.innerText||'';
+          const one = code.replace(/\n+/g,'\n').trim();
+          // 不足時に version を補う（備考の verEN= を参照）
+          if(/ version=\"/.test(one)) return one; // 既にversionあり
+          const note = r.querySelector('.col-notes')?.textContent||'';
+          const m = /verEN\s*=\s*([^\s/]+)/.exec(note);
+          const ver = m ? m[1].replace(/[^0-9A-Za-z_.-]/g,'') : '';
+          if(ver){
+            return one.replace(/^(<content\s+contentuid=\"[^\"]+\")>/, `$1 version="${ver}">`)
+                      .replace(/^<content\s+contentuid=\"([^\"]+)\"(\s*)>/, `<content contentuid="$1" version="${ver}">`);
+          }
+          return one;
+        })
         .filter(Boolean);
       if(!texts.length){ alert('JAなしの行はありません'); return; }
       const out = texts.join('\n');
       navigator.clipboard.writeText(out);
     }catch(e){ alert('コピーに失敗しました: '+e.message); }
   });
+  // 動的ツールチップ（warn-ico専用）: ソート/再描画後も位置を追従
+  (function initWarnTooltip(){
+    if(window._warnTipReady) return; window._warnTipReady = true;
+    const tip = document.createElement('div');
+    tip.id = 'tooltip-float';
+    tip.className = 'tooltip-float';
+    tip.hidden = true;
+    document.body.appendChild(tip);
+    let curEl = null;
+    function place(){
+      if(!curEl || tip.hidden) return;
+      const r = curEl.getBoundingClientRect();
+      // 上側中央に表示（スクロール・リサイズに追従）
+      tip.style.left = Math.round(r.left + r.width/2) + 'px';
+      // いったん表示して高さを計測
+      const h = tip.offsetHeight || 0;
+      tip.style.top = Math.max(8, Math.round(r.top - 10 - h)) + 'px';
+    }
+    document.addEventListener('mouseover', (e)=>{
+      const el = e.target.closest('.warn-ico.has-tip');
+      if(!el) return;
+      curEl = el;
+      tip.textContent = el.getAttribute('data-tip') || '';
+      tip.hidden = false;
+      tip.classList.add('show');
+      place();
+    });
+    document.addEventListener('mouseout', (e)=>{
+      const el = e.target.closest('.warn-ico.has-tip');
+      if(!el) return;
+      if(!el.contains(e.relatedTarget)){
+        tip.hidden = true;
+        tip.classList.remove('show');
+        curEl = null;
+      }
+    });
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+  })();
 }
 initCompareBindings();
 
