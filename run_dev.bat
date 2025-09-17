@@ -1,35 +1,35 @@
 @echo off
 setlocal ENABLEDELAYEDEXPANSION
-rem === 文字化け防止（UTF-8コードページに切替） ===
+rem === Set UTF-8 code page to avoid mojibake ===
 chcp 65001 >nul
 
-rem === スクリプトのある場所へ移動 ===
+rem === Move to script directory ===
 cd /d "%~dp0"
 
-rem === 仮想環境が無ければ作成（初回のみ）===
+rem === Create venv if missing (first run) ===
 if not exist ".venv" (
   echo [setup] creating venv...
   py -3 -m venv .venv
 )
 
-rem === 仮想環境を有効化 ===
+rem === Activate venv ===
 call .venv\Scripts\activate
 
-rem === 依存をインストール（失敗してもサーバは起動できるよう続行）===
+rem === Install dependencies (continue even if it fails) ===
 echo [setup] pip install -r requirements.txt
 pip install -r requirements.txt
 if errorlevel 1 (
-  echo [warn] requirements のインストールでエラーが出ましたが、既に入っていれば続行します。
+  echo [warn] pip install failed, continuing assuming dependencies are already installed.
 )
 
-rem === DBが無ければ初期化 ===
+rem === Initialize DB if missing ===
 if not exist "data" mkdir "data" 2>nul
 if not exist "data\app.sqlite" (
   echo [setup] initializing SQLite...
   python tools\init_db.py --db data\app.sqlite --schema db\schema.sql
 )
 
-rem === API起動（起動時にUIを自動オープン）===
+rem === Start API ===
 set TDB_AUTO_OPEN=0
 set TDB_POOL_SIZE=4
 
