@@ -1,0 +1,188 @@
+:root{
+  --bg:#ffffff; --fg:#111; --muted:#666;
+  --card:#f7f7f9; --line:#e2e2e8;
+  --btn:#efefef; --btn-hover:#e6e6e9;
+  --accent:#4f7cff;
+  --shadow: 0 2px 8px rgba(0,0,0,.06);
+}
+:root[data-theme="dark"]{
+  --bg:#0f1115; --fg:#e7eaf1; --muted:#aab2c5;
+  --card:#171a21; --line:#2b3140;
+  --btn:#232836; --btn-hover:#2b3344;
+  --accent:#7aa2ff;
+  --shadow: 0 6px 16px rgba(0,0,0,.35);
+}
+
+/* base */
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font:14px/1.6 system-ui,-apple-system,Segoe UI,Arial,sans-serif;
+}
+code,kbd,pre{font-family: ui-monospace,SFMono-Regular,Consolas,Menlo,monospace}
+
+.app-header{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 20px; border-bottom:1px solid var(--line); background:var(--card);
+  position:sticky; top:0; z-index:10;
+}
+.brand h1{margin:0; font-size:20px; font-weight:700}
+.brand small{display:block; color:var(--muted)}
+.actions{display:flex; gap:8px; align-items:center}
+button, .ghost{
+  appearance:none; border:1px solid var(--line); background:var(--btn); color:var(--fg);
+  padding:8px 12px; border-radius:8px; cursor:pointer;
+}
+button.primary{ background:var(--accent); color:#fff; border-color:transparent }
+button.primary:hover{ filter:brightness(0.95) }
+button:hover{ background:var(--btn-hover) }
+.btn-sm.danger{ border-color:#b74a4a; }
+.btn-sm.danger:hover{ background:#b74a4a; color:#fff; }
+.btn-icon{ padding:4px; min-width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px }
+.btn-icon.danger{ border-color:#b74a4a }
+.btn-icon.danger:hover{ background:#b74a4a; color:#fff }
+.menu-list > div{ gap:8px }
+.menu-list > div .right{ display:flex; gap:6px; align-items:center }
+.menu-list > div label{ flex:1 }
+.ghost{ background:transparent }
+.container{ max-width:1200px; margin:20px auto; padding:0 16px }
+body.wide .container{ max-width:100%; width:100%; }
+
+.card{
+  background:var(--card); border:1px solid var(--line); border-radius:12px;
+  padding:16px; box-shadow:var(--shadow); margin-bottom:16px;
+}
+
+.tabs{ display:flex; gap:8px; margin:10px 0 16px }
+.tab{ border-bottom:2px solid transparent; border-radius:8px 8px 0 0 }
+.tab[aria-selected="true"]{ border-color:var(--accent); background:transparent }
+
+/* forms */
+.form-row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+.inline{ display:flex; gap:6px; align-items:center }
+.inline input[type="text"], .inline input[type="number"], .inline select{ padding:6px 8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:8px }
+.hint{ color:var(--muted) }
+.muted{ color:var(--muted) }
+.page-desc{ display:block; color:var(--muted); margin:4px 0 12px }
+.btn-group{ display:flex; gap:8px; flex-wrap:wrap }
+.status{ margin-left:auto; color:var(--muted) }
+.status.ok{ color:#16a34a }
+.status.error{ color:#ef4444 }
+
+/* table */
+.table-wrap{ overflow:auto; border:1px solid var(--line); border-radius:10px; background:var(--bg) }
+.table{ width:100%; border-collapse:separate; border-spacing:0 }
+.table th, .table td{ padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top }
+.table thead th{ position:sticky; top:0; background:var(--card); z-index:1 }
+.table tbody tr:hover{ background:rgba(127,127,127,.06) }
+.table code{ background:transparent; padding:0 }
+#compareResult .codebox{ display:block; white-space:pre-wrap; word-break:break-word; padding:0; border:0; background:transparent; font-family: ui-monospace,SFMono-Regular,Consolas,Menlo,monospace; font-size:14px; line-height:1.5 }
+#compareResult .codebox code{ display:block; white-space:pre-wrap; word-break:break-word; tab-size:2 }
+/* Prism のデフォ背景を打ち消し（フォーム風に見えないように） */
+code[class*="language-"], pre[class*="language-"]{ background:transparent !important; box-shadow:none !important }
+#compareResult .sub{ color:var(--muted); font-size:12px; margin:6px 0 0 }
+/* compare table columns */
+#compareResult .col-code{ width:auto }
+#compareResult .col-status{ width:120px; font-weight:600 }
+#compareResult .col-notes{ width:28% }
+.meta{ color:var(--muted); font-size:12px; margin-top:4px }
+mark{ background: #ffe58f46; color: inherit; padding: 0 2px; border-radius:2px }
+
+/* compare coloring */
+.table tr.diff{ background: rgba(255, 128, 0, .06) }
+.table tr.warn{ background: rgba(255, 230, 0, .20) }
+.table tr.ok{ background: transparent }
+.table tr.same{ background: rgba(79, 124, 255, .12) }
+
+/* textarea */
+.terms{ width:100%; min-height:500px; resize:vertical; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--fg) }
+
+/* compare: row hover stronger */
+.table tbody tr:hover{ background:rgba(127,127,127,.12) }
+/* compare table visual separators */
+#compareResult table thead th{ border-right:1px solid var(--line) }
+#compareResult table{ table-layout:fixed }
+#compareResult table tbody td{ border-right:1px solid var(--line); word-break:break-word }
+#compareResult table thead th:last-child, #compareResult table tbody td:last-child{ border-right:none }
+
+/* highlight rows that were auto-filled (JA欠落をENで補完) */
+.filled-from-en{ box-shadow: inset 0 0 0 2px rgba(79,124,255,.35); background: rgba(79,124,255,.08); }
+
+/* multiselect menu */
+.multisel{ position:relative }
+.menu{
+  position:absolute; z-index:20; top:36px; left:0; width:360px;
+  background:var(--bg); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); padding:8px;
+}
+.menu-head{ display:flex; gap:8px; justify-content:flex-end; padding:4px 0 8px; border-bottom:1px solid var(--line) }
+.menu-list{ max-height:340px; overflow:auto; padding-top:8px }
+.menu-list > div{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px dashed var(--line) }
+.menu-list label{ display:flex; align-items:center; gap:8px; cursor:pointer }
+.menu-list .count{ color:var(--muted) }
+
+/* tooltip */
+.tip{
+  position: relative;
+  display:inline-flex; align-items:center; justify-content:center;
+  width:18px; height:18px; margin-left:6px; cursor:help; user-select:none;
+  border-radius:50%; background:var(--btn); color:var(--fg); border:1px solid var(--line);
+  font:700 12px/1 system-ui,-apple-system,Segoe UI,Arial,sans-serif;
+  z-index:1;
+}
+.tip:hover{ background:var(--btn-hover); }
+.tip:focus{ outline:2px solid var(--accent); outline-offset:2px; }
+.tip[data-tip]::after{
+  content:attr(data-tip);
+  position:absolute; z-index:30;
+  left:50%; transform:translate(-50%,-6px); bottom:calc(100% + 10px);
+  background:var(--card); color:var(--fg); border:1px solid var(--line);
+  border-radius:8px; padding:8px 10px; min-width:220px; max-width:360px;
+  box-shadow:var(--shadow); opacity:0; pointer-events:none;
+  white-space:normal; transition:opacity .12s ease, transform .12s ease;
+}
+.tip[data-tip]::before{
+  content:""; position:absolute; z-index:29; left:50%; transform:translateX(-50%); bottom:100%;
+  border:6px solid transparent; border-top-color:var(--line);
+}
+.tip:hover::after, .tip:focus::after{ opacity:1; transform:translate(-50%,-10px); }
+@media (hover:none){ .tip[data-tip]::after{ display:none; } }
+
+/* generic tooltip on any button/element */
+.has-tip{ position:relative }
+.has-tip[data-tip]::after{
+  content:attr(data-tip);
+  position:absolute; z-index:30;
+  left:50%; transform:translate(-50%,-6px); bottom:calc(100% + 10px);
+  background:var(--card); color:var(--fg); border:1px solid var(--line);
+  border-radius:8px; padding:8px 10px; min-width:220px; max-width:420px;
+  box-shadow:var(--shadow); opacity:0; pointer-events:none;
+  white-space:normal; transition:opacity .12s ease, transform .12s ease;
+}
+.has-tip[data-tip]::before{
+  content:""; position:absolute; z-index:29; left:50%; transform:translateX(-50%); bottom:100%;
+  border:6px solid transparent; border-top-color:var(--line);
+}
+.has-tip:hover::after, .has-tip:focus::after{ opacity:1; transform:translate(-50%,-10px); }
+
+/* tooltips that open below the trigger (for header buttons) */
+.has-tip.tip-bottom[data-tip]::after{
+  bottom:auto; top:calc(100% + 10px); transform:translate(-50%,6px);
+}
+.has-tip.tip-bottom[data-tip]::before{
+  bottom:auto; top:100%; border-top-color:transparent; border-bottom-color:var(--line);
+}
+
+/* prompt manager */
+.prompt-grid{display:grid; grid-template-columns:260px 1fr; gap:16px}
+.prompt-list{border-right:1px solid var(--line); padding-right:12px}
+#promptsUl{list-style:none; padding:0; margin:0}
+#promptsUl li{display:flex; justify-content:space-between; gap:8px; padding:6px 4px; border-bottom:1px solid var(--line)}
+#promptsUl li .meta{margin:0}
+@media (max-width:900px){ .prompt-grid{grid-template-columns:1fr} .prompt-list{border-right:none;padding-right:0} }
+
+/* inline edit */
+.table td input[type="text"], .table td textarea, .table td input[type="number"]{ width:100% }
+.table td textarea{ min-height:72px; resize:vertical }
+.btn-sm{ padding:4px 8px; font-size:12px; border-radius:6px }
+.btn-row{ display:flex; gap:6px; flex-wrap:wrap }
