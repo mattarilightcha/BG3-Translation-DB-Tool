@@ -1,5 +1,7 @@
 @echo off
 setlocal ENABLEDELAYEDEXPANSION
+rem === 文字化け防止（UTF-8コードページに切替） ===
+chcp 65001 >nul
 
 rem === スクリプトのある場所へ移動 ===
 cd /d "%~dp0"
@@ -21,7 +23,7 @@ if errorlevel 1 (
 )
 
 rem === DBが無ければ初期化 ===
-if not exist "data" mkdir data
+if not exist "data" mkdir "data" 2>nul
 if not exist "data\app.sqlite" (
   echo [setup] initializing SQLite...
   python tools\init_db.py --db data\app.sqlite --schema db\schema.sql
