@@ -65,7 +65,7 @@ def fts_escape_phrase(s: str) -> str:
     return f"\"{(s or '').replace('\"','\"\"')}\""
 
 # ---------------- FastAPI app ----------------
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.4.2"
 
 app = FastAPI(title="Translation DB Tool API")
 app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
