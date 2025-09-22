@@ -47,6 +47,7 @@
     <button class="tab" id="tab-prompts" aria-selected="false">プロンプト</button>
     <button class="tab" id="tab-compare" aria-selected="false">比較（XML差分）</button>
     <button class="tab" id="tab-matcher" aria-selected="false">翻訳照合（MODと公式の突き合わせ）</button>
+    <button class="tab" id="tab-tooltip" aria-selected="false">ツールチップ挿入</button>
   </nav>
 
   <!-- 検索 -->
@@ -141,6 +142,7 @@
         <button id="dlJSONL" class="has-tip" data-tip="照会結果をJSONLとしてファイル保存します。">JSONL保存</button>
         <button id="dlTSV" class="has-tip" data-tip="照会結果をTSVとしてファイル保存します。">TSV保存</button>
         <button id="dlCSV" class="has-tip" data-tip="照会結果をCSVとしてファイル保存します。Excel等での確認に便利です。">CSV保存</button>
+        <button id="q_reset" class="ghost has-tip" data-tip="照会タブの入力を既定値に戻します（Top-K, max_len, 完全一致, 単語境界, min_priority, プロンプト含める, 語リスト）">デフォに戻す</button>
       </div>
       <div class="status" id="queryStatus"></div>
     </div>
@@ -310,6 +312,76 @@
       <small class="hint">生成結果はメモリ上に保持されます（ページ遷移まで有効）。</small>
     </div>
     <div id="m_resultInfo" class="muted"></div>
+  </section>
+
+  <!-- ツールチップ挿入 -->
+  <section id="panel-tooltip" class="card" role="tabpanel" aria-labelledby="tab-tooltip" hidden>
+    <p class="page-desc">XMLの本文に、事前登録した用語→LSTag定義をもとに、未タグの箇所へ安全にツールチップタグ（エスケープ済）を挿入します。既存のタグは尊重し、二重適用を避けます。</p>
+    <div class="form-row">
+      <label class="inline" style="flex:1">XMLを貼り付け
+        <textarea id="tt_xml" class="terms" placeholder="<content contentuid=&quot;...&quot; version=&quot;...&quot;>日本語の本文…</content>"></textarea>
+      </label>
+    </div>
+    <div class="form-row">
+      <div class="inline">辞書
+        <span class="tip" tabindex="0" data-tip="用語→Tooltip名 の対応を管理。例：『知力』→ Intelligence。ローカル保存で運用します。">i</span>
+        <button id="tt_manageDict" class="ghost">辞書を管理</button>
+        <button id="tt_settings" class="ghost">設定</button>
+      </div>
+      <div class="btn-group">
+        <button id="tt_apply" class="primary has-tip" data-tip="貼り付けたXML本文に辞書のLSTagを適用します。既存タグ部分はスキップし、タグはエスケープ済みで出力します。">ツールチップを適用</button>
+        <button id="tt_copy" class="has-tip" data-tip="結果をクリップボードにコピーします。">結果をコピー</button>
+        <button id="tt_clear" class="has-tip" data-tip="入力と結果をクリアします。">クリア</button>
+      </div>
+      <div class="status" id="tt_status"></div>
+    </div>
+    <div class="table-wrap">
+      <table class="table" id="tt_table" hidden>
+        <thead>
+          <tr>
+            <th style="width:48%">入力</th>
+            <th style="width:4%"></th>
+            <th style="width:48%">結果（適用後）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><pre class="codebox"><code id="tt_input_code" class="language-xml"></code></pre></td>
+            <td></td>
+            <td><pre class="codebox"><code id="tt_output_code" class="language-xml"></code></pre></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <hr>
+    <p class="page-desc">下記で、日本語化されたXMLまたは公式日本語版のXMLを読み込み、頻出のLSTag（Tooltip/Type/本文）を抽出してランキング表示します。簡単に頻出のツールチップを辞書に追加できます。</p>
+    <div class="form-row">
+      <div class="inline">JA XML
+        <input type="file" id="tt_anl_file" accept=".xml">
+      </div>
+      <div class="inline">件数
+        <input type="number" id="tt_anl_topn" value="50" min="1" max="1000">
+      </div>
+      <div class="btn-group">
+        <button id="tt_anl_run" class="has-tip" data-tip="XML全体から &lt;LSTag ...&gt;...&lt;/LSTag&gt; を抽出し、Tooltip/Type/本文の組で集計して頻度順に表示します。">頻出抽出</button>
+        <button id="tt_anl_add_selected" class="primary has-tip" data-tip="選択した行を辞書に追加します（同じ用語は上書き）。">選択を辞書へ追加</button>
+      </div>
+      <div class="status" id="tt_anl_status"></div>
+    </div>
+    <div class="table-wrap">
+      <table class="table" id="tt_anl_table" hidden>
+        <thead>
+          <tr>
+            <th style="width:36px"><input type="checkbox" id="tt_anl_check_all"></th>
+            <th>本文（見出し語）</th>
+            <th>Tooltip</th>
+            <th>Type</th>
+            <th style="width:90px">頻度</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </section>
 </main>
 
