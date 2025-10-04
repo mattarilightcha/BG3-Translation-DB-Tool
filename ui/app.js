@@ -976,13 +976,35 @@ function initCompareBindings(){
     const mapEn = parseLocaXmlInline(enText);
     const mapJa = parseLocaXmlInline(jaText);
     const enUids = [...mapEn.keys()];
+    // version属性を書き換える（本文はそのまま）
+    const setVersionAttr = (rawContent, newVer)=>{
+      return String(rawContent||'').replace(/<content\b([^>]*)>/i, (m, attrs)=>{
+        const hasVer = /\bversion\s*=\s*"[^"]*"/i.test(attrs);
+        if(!newVer){
+          // versionを削除
+          const attrs2 = attrs.replace(/\s*version\s*=\s*"[^"]*"/i, '');
+          return `<content${attrs2}>`;
+        }
+        if(hasVer){
+          const attrs2 = attrs.replace(/version\s*=\s*"[^"]*"/i, `version="${newVer}"`);
+          return `<content${attrs2}>`;
+        }
+        return `<content${attrs} version="${newVer}">`;
+      });
+    };
     const piece = (uid)=>{
       const en = mapEn.get(uid);
       const ja = mapJa.get(uid);
       if(!en && !ja) return `<!-- missing: ${uid} -->`;
-      const text = (ja?.text ?? en?.text ?? '') || '';
-      const ver = (en?.version==null || en?.version==='') ? '' : ` version="${en.version}"`;
-      return `<content contentuid="${uid}"${ver}>${escapeHtml(text)}</content>`;
+      const newVerStr = (en?.version==null || en?.version==='') ? '' : String(en.version);
+      // JAがある場合は本文はそのまま、versionだけ合わせる
+      if(ja && ja.raw){
+        return setVersionAttr(ja.raw.trim(), newVerStr);
+      }
+      // JAが無い場合は従来通りに生成（本文はエスケープしない＝既存のエンティティを尊重）
+      const body = (ja?.text ?? en?.text ?? '') || '';
+      const verAttr = newVerStr ? ` version="${newVerStr}"` : '';
+      return `<content contentuid="${uid}"${verAttr}>${body}</content>`;
     };
     const formatted = enUids.map(piece).join('\n');
     const wrap = (function extractXmlWrapper(xmlText){
